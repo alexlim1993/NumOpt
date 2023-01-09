@@ -10,10 +10,10 @@ import datasets, utils
 FOLDER_PATH = "./results/"
 DATASET = "MNISTb"
 FUNC = "nls"
-ALG = "NewtonCG_NC"
+ALG = "NewtonMR_NC"
 INITX0 = "zeros" #zeros, ones, rand, randn
 REG = "None"
-HSUB = [1, 0.1, 0.05, 0.01]
+HSUB = [0.01]
 REG_LAMBDA = 0
 VERBOSE = True
 MULTIPLES = "HSub"
@@ -22,7 +22,7 @@ c = utils.const()
 c.alpha0 = 1
 c.gradtol = 1e-6
 c.maxite = 1000
-c.restol = 0.01
+c.restol = 0.000001
 c.inmaxite = 1000
 c.maxorcs = 1000
 c.lineMaxite = 100
@@ -35,14 +35,16 @@ cCG = utils.const()
 cCG.alpha0 = 1
 cCG.gradtol = 1e-6
 cCG.maxite = 1000
-cCG.restol = 1e-4
+cCG.restol = 0.01#1e-4
 cCG.inmaxite = 1000
 cCG.maxorcs = 1000
 cCG.lineMaxite = 100
-cCG.lineBeta = 0.1
+cCG.lineBeta = 1e-4#0.01
 cCG.lineRho = 0.9
 cCG.epsilon = 1e-4
 cCG.Hsub = HSUB
+
+C = c
 
 def run(folder_path, dataset, alg, func, x0, Hsub, reg, lamb, const, verbose):
     utils.makeFolder(folder_path)
@@ -72,4 +74,4 @@ def runMultiples(multiple, folder_path, dataset, alg, func, x0, Hsub, reg, lamb,
                               ("ite", "f"), ("ite", "g_norm")), folder_path)
     
 if __name__ == "__main__":
-    runMultiples(MULTIPLES, FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, cCG, VERBOSE)
+    runMultiples(MULTIPLES, FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, C, VERBOSE)

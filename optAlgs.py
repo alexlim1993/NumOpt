@@ -8,7 +8,6 @@ from linesearch import backwardArmijo, backForwardArmijo, dampedNewtonCGLinesear
 from loss_funcs import logisticFun
 from loadData import loadData
 import torch
-import datasets
 from optimizer import *
 from CG import CG, CappedCG
 from MINRES import myMINRES

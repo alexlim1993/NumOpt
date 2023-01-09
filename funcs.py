@@ -69,7 +69,9 @@ def fgHv(func, w, order = "012"):
 
 def nls(A, b, w):
     """
-    binary logistic regression with mean square error loss, i.e. nonlinear least square
+    Non-linear Least Square (NLS)
+    
+    binary logistic regression with mean square error loss.
     (non-convex function)
     """
     n, _ = A.shape
@@ -82,6 +84,8 @@ def nls(A, b, w):
 
 def logloss(A, b, w):
     """
+    Binary Logistic Loss function
+    
     binary logloss (convex function)
     """
     Aw = - torch.mv(A, w)

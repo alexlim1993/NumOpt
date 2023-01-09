@@ -85,7 +85,7 @@ def drawPlots(records, stats, name):
               "orcs" : "Oracle Calls", "ite" : "Iterations", "time" : "Time"}
     
     for x, y in stats:
-        plt.figure(figsize = (10, 10))
+        plt.figure(figsize=(10,6))
         c = 0
         for j, i in records:
             plt.loglog(torch.tensor(i[x]) + 1, i[y],
@@ -94,17 +94,8 @@ def drawPlots(records, stats, name):
                        color = color[c % len(color)],
                        label = j)
             c += 1
-        plt.xlabel(labels.get(x, x))
-        plt.ylabel(labels.get(y, y))
+        plt.xlabel(labels.get(x, x), fontsize=24)
+        plt.ylabel(labels.get(y, y), fontsize=24)
         plt.legend()
         plt.savefig(name + x + "_" + y)
         plt.close()
-    
-    
-    
-    
-    
-    
-    
-    
-    
