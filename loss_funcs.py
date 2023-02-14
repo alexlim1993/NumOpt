@@ -4,11 +4,6 @@ Created on Fri Jul 22 15:54:53 2022
 
 @author: uqalim8
 """
-import torch
-import numpy as np
-from numpy import random
-from derivativeTest import derivativeTest
-from torch.autograd.functional import hvp
 
 def nls(X, y, w, order = "012"):      
     n, d = X.shape
@@ -71,7 +66,17 @@ def logisticFun(x, A, b, reg, order_deriv = "012", H_matrix = False):
     
     return f, g, H
 
+def logisticModel(A, w):
+    expo = - torch.mv(A, w)
+    c = torch.maximum(expo, torch.zeros_like(expo, dtype = torch.float64))
+    expc = torch.exp(-c)
+    de = expc + torch.exp(- c + expo)
+    return expc / de
+
 if __name__ == "__main__":
+    import torch
+    from derivativeTest import derivativeTest
+    
     n, d = 1000, 50
     A = torch.randn((n, d), dtype = torch.float64)
     b = torch.randint(0, 2, (n,))

@@ -10,43 +10,50 @@ import math
 from derivativeTest import derivativeTest
 
 def funcWrapper(func, A, b, w, Hsub, reg, order):
-
-    if "012" == order and Hsub != 1:
-
-        if not reg is None: 
-            reg_f, reg_g, reg_H = fgHv(reg, w)
+    
+    if Hsub == 1 or not "2" in order:
+        if not reg is None:
+            return fgHv(lambda v : func(A, b, v) + reg(v), w, order)
         else:
-            reg_f, reg_g, reg_H = 0, 0, lambda v : 0
-            
+            return fgHv(lambda v : func(A, b, v), w, order)
+        
+    if Hsub != 1:
+        
         n, _ = A.shape
         m = math.ceil(n * Hsub)
         perm = torch.randperm(n)
+        reg_f, reg_g, reg_H = 0, 0, lambda v : 0
         
-        f, g = fgHv(lambda v : func(A, b, v), w, "01")
-        H = fgHv(lambda v : func(A[perm, :][:m, :], b[perm][:m], v), w, "2")
-        # f1, g1, H = fgHv(lambda v : func(A[perm, :][:m, :], b[perm][:m], v),
-        #                  w, "012")
+        if "2" == order:
+            if not reg is None:
+                reg_H = fgHv(reg, w, "2")
+                
+            H = fgHv(lambda v : func(A[perm, :][:m, :], b[perm][:m], v),
+                      w, "2")
+            return lambda v : H(v) + reg_H(v)
+
+        if "012" == order:
+            if not reg is None:
+                reg_f, reg_g, reg_H = fgHv(reg, w, "012")
+                
+            f1, g1, H = fgHv(lambda v : func(A[perm, :][:m, :], b[perm][:m], v),
+                             w, "012")
         
-        # f2, g2 = fgHv(lambda v : func(A[perm, :][m:, :], b[perm][m:], v),
-        #               w, "01")
-        
-        # f = m * f1 / n + (n - m) * f2 / n + reg_f
-        # g = m * g1 / n + (n - m) * g2 / n + reg_g
-        # Hv = lambda v : H(v) + reg_H(v)
-        f = f + reg_f
-        g = g + reg_g
-        Hv = lambda v : H(v) + reg_H(v)
-        return f, g, Hv
-    
-    if not reg is None:
-        return fgHv(lambda v : func(A, b, v) + reg(v), w, order)
-    
-    return fgHv(lambda v : func(A, b, v), w, order)
-        
+            f2, g2 = fgHv(lambda v : func(A[perm, :][m:, :], b[perm][m:], v),
+                          w, "01")
+            
+            # do we always need to take mean?
+            # will there be a function that it doesn't take mean?
+            # should mean be taken here or within the function itself?
+            f = m * f1 / n + (n - m) * f2 / n + reg_f
+            g = m * g1 / n + (n - m) * g2 / n + reg_g
+            Hv = lambda v : H(v) + reg_H(v)
+            return f, g, Hv
         
 def fgHv(func, w, order = "012"):
     
-    x = w.clone().requires_grad_(True)
+    with torch.no_grad():
+        x = w.clone().requires_grad_(True)
     f = func(x)
     
     if "0" == order:
@@ -64,23 +71,21 @@ def fgHv(func, w, order = "012"):
     if "012" == order:
         g = torch.autograd.grad(f, x, create_graph = True, retain_graph = True)[0]
         Hv = lambda v : torch.autograd.grad((g,), x, v, create_graph = False, retain_graph = True)[0].detach()
-        
-    return f.detach(), g.detach(), Hv
+        return f.detach(), g.detach(), Hv
 
 def nls(A, b, w):
     """
     Non-linear Least Square (NLS)
     
-    binary logistic regression with mean square error loss.
+    binary logistic regression with sum of square error loss (mean or not).
     (non-convex function)
     """
-    n, _ = A.shape
     Aw = - torch.mv(A, w)
     c = torch.maximum(Aw, torch.zeros_like(Aw, dtype = torch.float64))
     expc = torch.exp(-c)
     de = expc + torch.exp(Aw - c)
     total = torch.sum((b - expc / de)**2)
-    return total / n
+    return total / A.shape[0]
 
 def logloss(A, b, w):
     """

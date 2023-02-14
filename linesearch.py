@@ -28,10 +28,21 @@ def backForwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
 def dampedNewtonCGLinesearch(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite):
     const = beta * normpk / 6
     j = 0
-    while fun(xk + alpha * pk) > fk - const * (alpha ** 3):
+    while fun(xk + alpha * pk) > fk - const * (alpha ** 3) and j < maxite:
         alpha *= rho
         j += 1
     return alpha, j
+
+def dampedNewtonCGbackForwardLS(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite):
+    const = beta * normpk / 6
+    if fun(xk + alpha * pk) > fk - const * (alpha ** 3):
+        return dampedNewtonCGLinesearch(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite)
+    else:
+        j = 0
+        while fun(xk + alpha * pk) <= fk - const * (alpha ** 3) and j < maxite:
+            alpha /= rho
+            j += 1
+        return rho * alpha, j
 
 def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearchMaxItrs=200):
     """    
@@ -140,5 +151,5 @@ def Ax(A, x):
     if callable(A):
         Ax = A(x)
     else:
-        Ax =A.dot(x)
+        Ax = A.dot(x)
     return Ax

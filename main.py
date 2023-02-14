@@ -6,72 +6,52 @@ Created on Thu Aug 11 10:12:13 2022
 """
 
 import datasets, utils
+from hyperparameters import cGD, cMR, cCG_NC
+import torch
 
-FOLDER_PATH = "./results/"
-DATASET = "MNISTb"
-FUNC = "nls"
-ALG = "NewtonMR_NC"
-INITX0 = "zeros" #zeros, ones, rand, randn
-REG = "None"
-HSUB = [0.01]
-REG_LAMBDA = 0
+torch.manual_seed(1234)
+FOLDER_PATH = "./test/"
+DATASET = "MNIST"
+FUNC = "ffnnMSE" #"nls", "ffnnMSE", "ffnnCELoss", "AE_MNIST"
+INITX0 = "torch" #zeros, ones, uniform, normal, torch
+REG = "None" # None, 2-norm, Non-convex
+REG_LAMBDA = 10e-3
 VERBOSE = True
-MULTIPLES = "HSub"
+HSUB = [1, 0.1, 0.05, 0.01]
 
-c = utils.const()
-c.alpha0 = 1
-c.gradtol = 1e-6
-c.maxite = 1000
-c.restol = 0.000001
-c.inmaxite = 1000
-c.maxorcs = 1000
-c.lineMaxite = 100
-c.lineBetaB = 1e-4
-c.lineRho = 0.9
-c.lineBetaFB = 0.25
-c.Hsub = HSUB
+ALG = [
+       #("Linesearch_GD", cGD),
+       #("NewtonCG", cCG),
+       ("NewtonMR_NC", cMR), 
+       #("NewtonCG_NC", cCG_NC),
+       ("NewtonCG_NC_FW", cCG_NC),
+       ]
 
-cCG = utils.const()
-cCG.alpha0 = 1
-cCG.gradtol = 1e-6
-cCG.maxite = 1000
-cCG.restol = 0.01#1e-4
-cCG.inmaxite = 1000
-cCG.maxorcs = 1000
-cCG.lineMaxite = 100
-cCG.lineBeta = 1e-4#0.01
-cCG.lineRho = 0.9
-cCG.epsilon = 1e-4
-cCG.Hsub = HSUB
-
-C = c
-
-def run(folder_path, dataset, alg, func, x0, Hsub, reg, lamb, const, verbose):
+def run(folder_path, dataset, algo, func, x0, Hsub, reg, lamb, const, verbose):
     utils.makeFolder(folder_path)
-    trainX, trainY, testX, testY = datasets.prepareData(folder_path, dataset)
-    x0 = utils.initx0(x0, trainX.shape[-1])
+    trainX, trainY, testX, testY = datasets.prepareData(folder_path, func, dataset)
     reg = utils.initReg(reg, lamb)
-    func = utils.initFunc(func, trainX, trainY, Hsub, reg)
-    algo = utils.initAlg(func, x0, alg, const)
-    algo.optimize(verbose)
-    return algo
+    x0, pred, func = utils.initFunc_x0(func, x0, trainX, trainY, Hsub, reg)
+    algo = utils.initAlg(func, x0.clone(), algo, const)
+    algo.optimize(verbose, pred)
+    return algo, x0
         
-def runMultiples(multiple, folder_path, dataset, alg, func, x0, Hsub, reg, lamb, const, verbose):
+def runMultiples(folder_path, dataset, alg, func, x0, Hsub, reg, lamb, verbose):
     
-    records = []
+    assert type(Hsub) == list
+    assert type(alg) == list
     
-    if multiple == "HSub":
-        assert type(Hsub) == list
-        for i in HSUB:
-            print("\n" + 15*"." + f"{alg} {multiple} {i}" + 15*"." + "\n")
-            const.Hsub = i
-            algo = run(folder_path, dataset, alg, func, x0, i, reg, lamb, const, verbose)
-            utils.saveRecords(folder_path, dataset, alg, func, i, algo.record)
-            records.append((alg + f" {multiple}_{i}", algo.record))
+    for j, c in alg:
+        for i in Hsub:
+            print("\n" + 45 * ".")
+            c.Hsub = i
+            algo, x0 = run(folder_path, dataset, j, func, x0, i, reg, lamb, c, verbose)
+            utils.saveRecords(folder_path, dataset, j, func, i, algo.record)
+            #records.append((j + f"ss_{i}", algo.record))
     
-    utils.drawPlots(records, (("orcs", "f"), ("orcs", "g_norm"), 
-                              ("time", "f"), ("time", "g_norm"),
-                              ("ite", "f"), ("ite", "g_norm")), folder_path)
+   # utils.drawPlots(records, (("orcs", "f"), ("orcs", "g_norm"), 
+   #                           ("time", "f"), ("time", "g_norm"),
+   #                           ("ite", "f"), ("ite", "g_norm")), folder_path)
     
 if __name__ == "__main__":
-    runMultiples(MULTIPLES, FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, C, VERBOSE)
+    runMultiples(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, VERBOSE)
