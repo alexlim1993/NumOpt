@@ -4,6 +4,7 @@ Created on Fri Jul 22 15:54:53 2022
 
 @author: uqalim8
 """
+import torch
 
 def nls(X, y, w, order = "012"):      
     n, d = X.shape

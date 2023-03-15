@@ -12,6 +12,9 @@ def backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
     while fun(xk + alpha * pk) > fk + alpha * betagp and j < maxite:
         alpha *= rho
         j += 1
+    if j >= maxite:
+        print("linesearch max acheived!")
+        
     return alpha, j
 
 def backForwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
@@ -40,9 +43,9 @@ def dampedNewtonCGbackForwardLS(fun, xk, fk, alpha, pk, normpk, beta, rho, maxit
     else:
         j = 0
         while fun(xk + alpha * pk) <= fk - const * (alpha ** 3) and j < maxite:
-            alpha /= rho
+            alpha = 2 * alpha
             j += 1
-        return rho * alpha, j
+        return alpha / 2, j
 
 def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearchMaxItrs=200):
     """    
@@ -69,12 +72,12 @@ def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearc
     fb = f0 # f preview
     while itrLS < linesearchMaxItrs:
         fa, ga = objFun(xk + a2*pk)
-        g0p = g0.T.dot(pk)
+        g0p = torch.dot(g0, pk) #g0.T.dot(pk)
         if fa > f0 + a2*c1*g0p or (fa >= fb and itrLS > 0):
             alpha, itrs2 = zoomf(a1, a2, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs)
-            
             break
-        gap = ga.T.dot(pk)
+        
+        gap = torch.dot(ga, pk)
         if abs(gap) <= -c2*g0p:
             alpha = a2
             itrs2 = 0
@@ -99,10 +102,10 @@ def zoomf(a1, a2, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs)
         itrs2 += 1
         # lower bound
         fa1, ga1 = objFun(xk + a1*pk)
-        ga1p = ga1.T.dot(pk)
+        ga1p = torch.dot(ga1, pk) #ga1.T.dot(pk)
         # upper bound
         fa2, ga2 = objFun(xk + a2*pk)
-        ga2p = ga2.T.dot(pk)
+        ga2p = torch.dot(ga2, pk) #ga2.T.dot(pk)
         aj = cubicInterp(a1, a2, fa1, fa2, ga1p, ga2p)
         a_mid = (a1 + a2)/2
         if not inside(aj, a1, a_mid):
@@ -111,8 +114,8 @@ def zoomf(a1, a2, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs)
         if faj > f0 + aj*c1*g0p or faj >= fa1:
             a2 = aj
         else:
-            gajp = gaj.T.dot(pk)
-            if np.abs(gajp) <= -c2*g0p:
+            gajp = torch.dot(gaj, pk) #gaj.T.dot(pk)
+            if torch.abs(gajp) <= -c2*g0p:
                 break
             if gajp*(a2 - a1) >= 0:
                 a2 = a1
@@ -125,19 +128,25 @@ def cubicInterp(x1, x2, f1, f2, g1, g2):
     # function (f1 and f2) and derivative (g1 and g2).
     # Nocedal and Wright Eqn (3.59)
 #    print(x1 - x2)
-    d1 = g1 + g2 - 3*(f1 - f2)/(x1 - x2)
+    d1 = g1 + g2 - 3 * (f1 - f2) / (x1 - x2)
 #    if d1**2 - g1*g2 <= 0:
 #        d2 = 0
 #    else:
 #        d2 = np.sign(x2 - x1)*np.sqrt(d1**2 - g1*g2)
-    d2 = np.sign(x2 - x1)*np.sqrt(d1**2 - g1*g2)
-    xmin = x2 - (x2 - x1)*(g2 + d2 - d1)/(g2 - g1 + 2*d2);
+    sign = x2 - x1
+    if sign < 0:
+        sign = -1
+    elif sign > 0:
+        sign = 1
+        
+    d2 = sign * torch.sqrt(d1**2 - g1*g2)
+    xmin = x2 - (x2 - x1)*(g2 + d2 - d1) / (g2 - g1 + 2*d2);
     return xmin
     
 def inside(x, a, b):
     # test x \in (a, b) or not
     l = 0
-    if not np.isreal(x):
+    if not torch.isreal(x):
         return l
     if a <= b:
         if x >= a and x <= b:

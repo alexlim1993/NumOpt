@@ -5,10 +5,10 @@ Created on Tue Oct 25 12:54:55 2022
 @author: uqalim8
 """
 import torch
+ZERO = 1e-8
 
-def CG(A, b, x0 = None, tol = 1e-2, maxite = 100):
-    if x0 is None:
-        x0 = torch.zeros(b.shape[0], dtype = torch.float64)
+def CG(A, b, tol = 1e-2, maxite = 100):
+    x0 = torch.zeros(b.shape[0], dtype = torch.float64)
     rkm1 = b - Ax(A, x0)
     pk = rkm1.clone()
     xkm1 = x0
@@ -26,10 +26,60 @@ def CG(A, b, x0 = None, tol = 1e-2, maxite = 100):
         k += 1
     return xkm1, k
 
+def CGSteihaug(H, g, delta, tol, maxite):
+    
+    z = torch.zeros_like(g)
+    # if torch.norm(g) < tol:
+    #     return z, "||g||<tol", 1, 0
+    
+    j = 0
+    d, r = -g.clone(), g.clone()
+    while j <= maxite:
+        Bd = Ax(H, d)
+        dBd = torch.dot(d, Bd)
+        j += 1
+        if dBd <= 0:
+            dz = torch.dot(d, z)
+            norm_d, norm_z = torch.norm(d), torch.norm(z)
+            numerator = - dz + torch.sqrt(dz**2  - norm_d**2 * (norm_z**2 - delta**2))
+            tau = numerator / norm_d**2
+            p = z + tau * d
+            m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
+            return p, "NC", m0_mk, j
+        
+        norm_r = torch.dot(r, r)
+        alpha = norm_r / dBd
+        zp1 = z + alpha * d
+        if torch.norm(zp1) >= delta:
+            dz = torch.dot(d, z)
+            norm_d, norm_z = torch.norm(d), torch.norm(z)
+            numerator = - dz + torch.sqrt(dz**2  - norm_d**2 * (norm_z**2 - delta**2))
+            tau = numerator / norm_d**2
+            p = z + tau * d
+            m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
+            return p, "SOL,=", m0_mk, j
+
+        z = zp1
+        r = r + alpha * Bd
+        if torch.norm(r) < tol:
+            p = z
+            m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
+            return p, "SOL,<", m0_mk, j
+        
+        norm_rp1 = torch.dot(r, r)
+        beta = norm_rp1 / norm_r
+        d = -r + beta * d
+        norm_r = norm_rp1
+    
+    p = z
+    m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
+
+    return p, "MAX,<", m0_mk, j
+        
+
 def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
     g = -b
     y =  torch.zeros_like(g)
-#    print(dim)
     kappa, tzeta, tau, T = para(M, epsilon, zeta)
     tHy = y.clone()
     tHY = y.reshape(-1, 1)

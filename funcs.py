@@ -5,7 +5,7 @@ Created on Thu Nov 24 12:35:21 2022
 @author: uqalim8
 """
 
-import torch
+import torch, GAN
 import math
 from derivativeTest import derivativeTest
 
@@ -19,7 +19,7 @@ def funcWrapper(func, A, b, w, Hsub, reg, order):
         
     if Hsub != 1:
         
-        n, _ = A.shape
+        n, d = A.shape
         m = math.ceil(n * Hsub)
         perm = torch.randperm(n)
         reg_f, reg_g, reg_H = 0, 0, lambda v : 0
@@ -48,6 +48,9 @@ def funcWrapper(func, A, b, w, Hsub, reg, order):
             f = m * f1 / n + (n - m) * f2 / n + reg_f
             g = m * g1 / n + (n - m) * g2 / n + reg_g
             Hv = lambda v : H(v) + reg_H(v)
+            
+            # ran = torch.rand(d, dtype = torch.float64)
+            # Hv = lambda v : ran * torch.dot(ran, v)
             return f, g, Hv
         
 def fgHv(func, w, order = "012"):
@@ -77,6 +80,8 @@ def nls(A, b, w):
     """
     Non-linear Least Square (NLS)
     
+    !! This has not been averaged !!
+    
     binary logistic regression with sum of square error loss (mean or not).
     (non-convex function)
     """
@@ -96,7 +101,7 @@ def logloss(A, b, w):
     Aw = - torch.mv(A, w)
     c = torch.maximum(Aw, torch.zeros_like(Aw, dtype = torch.float64))
     expc = torch.exp(-c)
-    return torch.sum(c + torch.log(expc + torch.exp(Aw - c)) - b * Aw)
+    return torch.sum(c + torch.log(expc + torch.exp(Aw - c)) - b * Aw) / A.shape[0]
 
 def logisticModel(A, w):
     expo = - torch.mv(A, w)

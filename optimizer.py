@@ -7,13 +7,19 @@ Created on Thu Nov 24 15:59:37 2022
 import time
 
 GD_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", 
-            "g_norm":".2e", "alpha":".2e", "acc":".2f"}
+            "g_norm":".4e", "alpha":".2e", "acc":".2f"}
 
 NEWTON_STATS = {"ite":"g", "inite":"g", "orcs":"g", "time":".2f", 
-                "f":".4e", "g_norm":".2e", "alpha":".2e", "acc":".2f"}
+                "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
 
-NEWTON_NC_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g",
-                   "time":".2f", "f":".4e", "g_norm":".2e", "alpha":".2e", "acc":".2f"}
+NEWTON_NC_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
+
+NEWTON_TR_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "delta":".2e", "acc":".2f"}
+
+L_BFGS_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", "g_norm":".4e", 
+                "alpha":".2e", "acc":".2f"}
 
 class Optimizer:
     

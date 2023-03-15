@@ -5,7 +5,7 @@ Created on Mon Jan  9 12:33:43 2023
 @author: uqalim8
 """
 import torch.nn as nn
-import torch, math
+import torch, math, GAN
 
 class auto_Encoder_MNIST(nn.Module):
     def __init__(self):
@@ -59,7 +59,21 @@ class FFN(nn.Module):
 
     def forward(self, x):
         return self._nn(x)
-
+    
+class RNNet(nn.Module):
+    
+    def __init__(self, input_dim, hidden_size, layers, output):
+        super().__init__()
+        self._hidden_size = hidden_size
+        self._layers = layers
+        self._input_dim = input_dim
+        self._nn = nn.Linear(layers * hidden_size, output)
+        self._rnn = nn.RNN(input_dim, hidden_size, layers, batch_first = True)
+        
+    def forward(self, x):
+        x = self._rnn(x)[1].movedim(0, 1).reshape(-1, self._layers * self._hidden_size)
+        return self._nn(x)
+    
 def nnWrapper(func, loss, trainX, trainY, w, Hsub, reg, order):
     
     nn.utils.vector_to_parameters(w, func.parameters())
@@ -89,7 +103,7 @@ def nnWrapper(func, loss, trainX, trainY, w, Hsub, reg, order):
             Hv = nnfgHv(func, loss, trainX, trainY, order)
             return lambda v : Hv(v) + reg_Hv(v)
             
-    n, _ = trainX.shape
+    n = trainX.shape[0]
     m = math.ceil(n * Hsub)
     perm = torch.randperm(n)
     reg_f, reg_g, reg_H = 0, 0, lambda v : 0
@@ -168,14 +182,15 @@ def fgHv(func, w, order = "012"):
         return f.detach(), g.detach(), Hv
     
 if __name__ == "__main__":
-    from datasets import MNIST
     from derivativeTest import derivativeTest
 
-    trainX, trainY, _, _ = MNIST("./test/", True, 10)
-    ffn = FFN(28 * 28, 10)
-    loss = nn.MSELoss()
-    w = nn.utils.parameters_to_vector(ffn.parameters()).shape[0]
-    fun = lambda w : nnWrapper(ffn, loss, trainX, trainY, w, 1, None, "012")
-    derivativeTest(fun, torch.rand(w, dtype = torch.float64))
+    trainX = torch.rand((1000, 28, 28)).double()
+    trainY = torch.rand((1000, 10)).double()
+    ffn = RNNet(28, 20, 10).double()
     
+    loss = nn.MSELoss()
+    fun = lambda w : nnWrapper(ffn, loss, trainX, trainY, w, 1, None, "012")
+    derivativeTest(fun, nn.utils.parameters_to_vector(ffn.parameters()).detach())
+    
+
     
