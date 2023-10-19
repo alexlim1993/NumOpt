@@ -4,15 +4,17 @@ Created on Fri Oct 21 12:15:49 2022
 
 @author: uqalim8
 """
-
 import torch
 
-def backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
+def backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite, minalpha = 1e-18):
     betagp = torch.dot(gk, pk) * beta
     j = 1
     while fun(xk + alpha * pk) > fk + alpha * betagp and j < maxite:
         alpha *= rho
         j += 1
+        if alpha < minalpha:
+            alpha = minalpha
+            break
     if j >= maxite:
         print("linesearch max exceeded!")
     return alpha, j
@@ -22,13 +24,31 @@ def backForwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
     if fun(xk + alpha * pk) > fk + alpha * betagp:
         return backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite)
     else:
-        j = 1
+        j = 0
         while fun(xk + alpha * pk) <= fk + alpha * betagp and j < maxite:
             alpha /= rho
             j += 1
         if j >= maxite:
             print("linesearch max exceeded!")
-    return rho * alpha, j
+        return rho * alpha, j
+        
+def backForwardArmijo_mod(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
+    betagp = torch.dot(gk, pk) * beta
+    f = fun(xk + alpha * pk)
+    if f > fk + alpha * betagp:
+        return backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite)
+    else:
+        j = 1
+        while f <= fk + alpha * betagp and j < maxite:
+            alpha /= rho
+            fn = fun(xk + alpha * pk)
+            j += 1
+            if f < fn:
+                break
+            f = fn
+        if j >= maxite:
+            print("linesearch max exceeded!")
+        return rho * alpha, j
 
 def dampedNewtonCGLinesearch(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite):
     const = beta * normpk / 6
@@ -53,7 +73,8 @@ def dampedNewtonCGbackForwardLS(fun, xk, fk, alpha, pk, normpk, beta, rho, maxit
             print("linesearch max exceeded!")
         return alpha / 2, j
 
-def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearchMaxItrs=200):
+def lineSearchWolfeStrong(objFun, xk, pk, f0, g0, alpha0 = 1, maxalpha = 1e5, c1=1e-4, c2=0.5, linesearchMaxItrs=1000):
+    #original c2 = 0.9
     """    
     All vector are column vectors.
     INPUTS:
@@ -72,11 +93,12 @@ def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearc
     itrLS = 0
     itrs2 = 0
     a1 = 0
-#    a2 = infun(0, amax)
+    #a2 = infun(0, amax)
     a2 = alpha0
-    f0, g0 = objFun(xk)
+    #f0, g0 = objFun(xk)
     fb = f0 # f preview
     while itrLS < linesearchMaxItrs:
+        itrLS += 1
         fa, ga = objFun(xk + a2*pk)
         g0p = torch.dot(g0, pk) #g0.T.dot(pk)
         if fa > f0 + a2*c1*g0p or (fa >= fb and itrLS > 0):
@@ -88,18 +110,22 @@ def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearc
             alpha = a2
             itrs2 = 0
             break
+
         if gap >= 0:
             alpha, itrs2 = zoomf(a2, a1, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs)
-            
-#            alpha, itrs2 = zoomf(a1, a2, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs)
             break
+
         a2 = a2*2
         fb = fa
-        itrLS += 1
+        if a2 > maxalpha:
+            alpha = maxalpha
+            break 
+
+    orcs = itrLS * 2 + itrs2 * 6
     itrLS += itrs2
-#     if itrLS >= linesearchMaxItrs:        
-#         alpha = 0
-    return alpha, itrLS
+    if alpha < 1e-18:        
+        alpha = 0
+    return alpha, itrLS, orcs
 
 def zoomf(a1, a2, objFun, f0, fa, g0p, xk, pk, c1, c2, itrLS, linesearchMaxItrs):
     itrs2 = 0

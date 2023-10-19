@@ -6,7 +6,8 @@ Created on Mon Oct 24 18:31:13 2022
 """
 
 from linesearch import (backwardArmijo, 
-                        backForwardArmijo, 
+                        backForwardArmijo,
+                        backForwardArmijo_mod, 
                         dampedNewtonCGLinesearch, 
                         dampedNewtonCGbackForwardLS, 
                         lineSearchWolfeStrong)
@@ -25,12 +26,12 @@ NEWTON_STATS = {"ite":"g", "inite":"g", "orcs":"g", "time":".2f",
                 "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
 
 NEWTON_NC_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
-                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
+                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".4e"}
 
 NEWTON_TR_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
                    "f":".4e", "g_norm":".4e", "delta":".2e", "acc":".2f"}
 
-L_BFGS_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", "g_norm":".4e", 
+L_BFGS_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", "g_norm":".4e", "iteLS":"g", 
                 "alpha":".2e", "acc":".2f"}
 
 class Optimizer:
@@ -44,6 +45,7 @@ class Optimizer:
         self.gknorm, self.record = None, None
         self.maxite = maxite
         self.gradtol = gradtol
+        self.alphak = 1
         self.record = dict(((i, []) for i in self.info.keys()))
         
     def recording(self, stats):
@@ -59,15 +61,15 @@ class Optimizer:
         form = ["{:^13" + i + "}" for i in self.info.values()]
         print("|".join(form).format(*(self.record[i][-1] for i in self.info.keys())))        
     
-    def progress(self, verbose, pred, skip = 1):
+    def progress(self, verbose, pred, print_skip = 1):
         self.k += 1
         self.oracleCalls()
         self.recordStats(pred(self.xk))
-        if verbose and self.k % skip == 0:
+        if verbose and self.k % print_skip == 0:
             self.printStats()
 
     def termination(self):
-        return self.k >= self.maxite or self.gknorm <= self.gradtol or self.orcs >= self.maxorcs
+        return self.k > self.maxite or self.gknorm < self.gradtol or self.orcs > self.maxorcs or self.alphak < 1e-18
     
     def optimize(self, verbose, pred):
         self.recordStats(pred(self.xk))
@@ -119,16 +121,19 @@ class linesearchGD(Optimizer):
 class MiniBatchSGD(Optimizer):
     
     def __init__(self, fun, x0, gradtol, maxite, maxorcs, mini, alpha = 0.001):
-        super().__init__(fun, x0, alpha, gradtol, maxite, maxorcs)
         self.info = SGD_STATS
+        self.mini = mini
+        super().__init__(fun, x0, alpha, gradtol, maxite, maxorcs)
     
     def step(self):
         self.gk = self.fun(self.xk, "1")
-        self.xk -= self.alpha * self.gk
+        self.fk = self.fun(self.xk, "f")
+        self.xk -= self.alpha0 * self.gk
         
     def recordStats(self, acc):
         if self.k == 0:
-            self.fk, self.gk = self.fun(self.xk, "01")
+            self.gk = self.fun(self.xk, "1")
+            self.fk = self.fun(self.xk, "f")
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, 0, float(self.fk), float(self.gknorm), acc))
@@ -137,13 +142,13 @@ class MiniBatchSGD(Optimizer):
                                float(self.fk), float(self.gknorm), acc))
                 
     def oracleCalls(self):
-        self.orcs += 2 
+        self.orcs += 2 * self.mini 
     
 class Adam(Optimizer):
     
-    def __init__(self, fun, x0, gradtol, maxite, maxorcs, mini, 
-                 alpha = 0.001, beta1 = 0.9, beta2 = 0.999, epsilon = 10e-8):
+    def __init__(self, fun, x0, gradtol, maxite, maxorcs, mini, alpha = 0.001, beta1 = 0.9, beta2 = 0.999, epsilon = 10e-8):
         self.info = SGD_STATS
+        self.mini = mini
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
@@ -152,26 +157,28 @@ class Adam(Optimizer):
         super().__init__(fun, x0, alpha, gradtol, maxite, maxorcs)
         
     def step(self):
-        self.fk, self.gk = self.fun(self.xk, "01")
+        self.gk = self.fun(self.xk, "1")
         self.m = self.beta1 * self.m + (1 - self.beta1) * self.gk
         self.v = self.beta2 * self.v + (1 - self.beta2) * (self.gk ** 2)
         mp = self.m / (1 - self.beta1 ** (self.k + 1))
         vp = self.v / (1 - self.beta2 ** (self.k + 1))
         self.xk -= self.alpha0 * mp / (torch.sqrt(vp) - self.epsilon)
-        self.gknorm = torch.linalg.norm(self.gk, 2)
         
     def recordStats(self, acc):
         if self.k == 0:
-            self.fk, self.gk = self.fun(self.xk, "01")
-            self.inite = 0
+            self.gk = self.fun(self.xk, "1")
+            self.fk = self.fun(self.xk, "f")
+            #self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, 0, float(self.fk), float(self.gknorm), acc))
         else:
-            self.recording((self.k, self.orcs, self.toc, 
-                               float(self.fk), float(self.gknorm), acc))
+            if not self.k % 100:
+                self.gknorm = torch.linalg.norm(self.gk, 2)
+                self.recording((self.k, self.orcs, self.toc, 
+                                float(self.fun(self.xk, "f")), float(self.gknorm), acc))
             
     def oracleCalls(self):
-        self.orcs += 2 
+        self.orcs += 2 * self.mini 
         
 class NewtonCG(Optimizer):
     
@@ -221,6 +228,7 @@ class NewtonCG_NC(Optimizer):
         self.lineRho = lineRho
         self.epsilon = epsilon
         self.Hsub = Hsub
+        self.alpha0 = alpha0
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
     
     def step(self):
@@ -230,6 +238,7 @@ class NewtonCG_NC(Optimizer):
             pk = - torch.sign(torch.dot(pk, self.gk)) * abs(pHp) * pk / normpk
         self.alphak, self.lineite = dampedNewtonCGLinesearch(lambda x : self.fun(x, "0"), self.xk, self.fk, self.alpha0, pk, 
                                                              normpk, self.lineBeta, self.lineRho, self.lineMaxite)
+
         self.xk += self.alphak * pk
         self.fk, self.gk, self.hk = self.fun(self.xk, "012")
         
@@ -276,22 +285,28 @@ class NewtonMR_NC(Optimizer):
         self.lineRho = lineRho
         self.lineBetaFB = lineBetaFB
         self.Hsub = Hsub
+        self.alpha_npc = 1
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
         
     def step(self):
-        pk, _, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, self.restol, 
-                                                    self.inmaxite, shift = 0.1)
+        pk, self.relr, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, maxit = self.inmaxite)
+
+        #if self.dtype == "NC":
+        #    self.restol *= 1.1
+        #if self.dtype == "Sol":
+        #    self.restol /= 1.1
+        
         if self.dtype == "Sol" or self.dtype == "MAX":
             self.alphak, self.lineite = backwardArmijo(lambda x : self.fun(x, "0"), 
                                                        self.xk, self.fk, self.gk, self.alpha0, pk, 
                                                        self.lineBetaB, self.lineRho, self.lineMaxite)
         else:
-            self.alphak, self.lineite = backForwardArmijo(lambda x : self.fun(x, "0"), 
-                                                          self.xk, self.fk, self.gk, self.alpha0, r, 
+            self.alphak, self.lineite = backForwardArmijo_mod(lambda x : self.fun(x, "0"), 
+                                                          self.xk, self.fk, self.gk, self.alpha_npc, r, 
                                                           self.lineBetaFB, self.lineRho, self.lineMaxite)
+            self.alpha_npc = self.alphak
             pk = r
-            
-        assert torch.dot(pk, self.gk) < 0
+        
         self.xk += self.alphak * pk
         self.fk, self.gk, self.hk = self.fun(self.xk, "012")
         
@@ -301,14 +316,32 @@ class NewtonMR_NC(Optimizer):
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, "None", 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, acc))
+                             float(self.gknorm), 0, 0))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((self.k, self.inite, self.dtype, self.orcs, 
-                               self.toc, float(self.fk), float(self.gknorm), self.alphak, acc))
+                               self.toc, float(self.fk), float(self.gknorm), 
+                               self.alphak, float(acc)))
         
     def oracleCalls(self):
         self.orcs += 2 + 2 * self.inite * self.Hsub + self.lineite
+
+class NewtonMR_NC_no_LS(NewtonMR_NC):
+
+    def step(self):
+        pk, self.relr, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, maxit = self.inmaxite)
+
+        if not (self.dtype == "Sol" or self.dtype == "MAX"):
+           self.alphak = self.alpha0
+           pk = r 
+        else:
+           self.alphak = 1
+
+        self.xk += self.alphak * pk
+        self.fk, self.gk, self.hk = self.fun(self.xk, "012")
+
+    def oracleCalls(self):
+        self.orcs += 2 + 2 * self.inite * self.Hsub
         
 class NewtonCG_TR_Steihaug(Optimizer):
     
@@ -376,7 +409,7 @@ class L_BFGS(Optimizer):
         k = self.s.shape[0]
         alpha, rho = torch.zeros(k, dtype = cTYPE), torch.zeros(k, dtype = cTYPE)
         for i in range(k):
-            rho[i] = 1 / torch.dot(self.s[i], self.y[i])
+            rho[i] = 1/torch.dot(self.s[i], self.y[i])
             alpha[i] = rho[i] * torch.dot(self.s[i], w)
             w = w - alpha[i] * self.y[i]
             
@@ -392,13 +425,17 @@ class L_BFGS(Optimizer):
         if not self.k:
             pk = -self.gk
         else:
-            pk = self._twoloop(-self.gk)
+            pk = self._twoloop(-self.gk).detach()
         
-        self.alpha, self.lineite = lineSearchWolfeStrong(lambda x : self.fun(x, "01"), self.xk, pk, 
-                                                         self.alpha0, 1e-4, 0.9, self.lineMaxite)
+        self.alpha, self.lineite, self.lineorcs = lineSearchWolfeStrong(lambda x : self.fun(x, "01"), self.xk, pk, 
+                                                         self.fk, self.gk, self.alpha0, 1e5, 1e-4, 0.9, self.lineMaxite)
         xkp1 = self.xk + self.alpha * pk
-        xkp1.detach()
         self.fk, gkp1 = self.fun(xkp1, "01")
+
+        # kill small alpha and terminate
+        if self.alpha == 0:
+            self.orcs = self.maxorcs
+            self.lineorcs = 0
 
         if self.k and self.s.shape[0] >= self.m:
             self.s = self.s[:-1]
@@ -423,14 +460,14 @@ class L_BFGS(Optimizer):
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, acc))
+                             float(self.gknorm), 0, 0, acc))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((self.k, self.orcs, self.toc, float(self.fk), 
-                            float(self.gknorm), float(self.alpha), acc))  
+                            float(self.gknorm), self.lineite, float(self.alpha), acc))  
             
     def oracleCalls(self):
-        self.orcs += 2 + 2 * self.lineite
+        self.orcs += 2 + self.lineorcs
 
 if __name__ == "__main__":
     from loss_funcs import logisticFun, logisticModel

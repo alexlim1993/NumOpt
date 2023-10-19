@@ -97,27 +97,25 @@ def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
     if ptHp < epsilon*norm_p**2:
         d = p
         dType = 'NC'
-        print('b')
         return d, dType, j, ptHp, 1
     norm_Hp = torch.norm(tHp - 2*epsilon*p)
     if norm_Hp > M*norm_p:
         M = norm_Hp/norm_p
-        kappa, tzeta, tau, T = para(M, epsilon, zeta)
+        kappa, tzeta, tau, T = para(M, epsilon, zeta)    
     while j < maxiter:
-#        print(j, M, torch.norm(r)/norm_g, tzeta)
         alpha = rr/ptHp
         y = y + alpha*p
-        Y = torch.cat((Y, y.reshape(-1, 1)), 1) #record y
+        #Y = torch.cat((Y, y.reshape(-1, 1)), 1) #record y
         norm_y = torch.norm(y)
         tHy = tHy + alpha*tHp
-        tHY = torch.cat((tHY, tHy.reshape(-1, 1)), 1) # record tHy
+        #tHY = torch.cat((tHY, tHy.reshape(-1, 1)), 1) # record tHy
         norm_Hy = torch.norm(tHy - 2*epsilon*y)
         r = r + alpha*tHp
         rr_new = torch.dot(r, r) 
         beta = rr_new/rr
         rr = rr_new
         p = -r + beta*p #calculate Hr
-        norm_p = torch.norm(p)        
+        norm_p = torch.norm(p)    
         tHp_new = Ax(H, p) + 2*epsilon*p #the only Hessian-vector product
         j = j + 1
         tHr = beta*tHp - tHp_new #calculate Hr
@@ -153,7 +151,7 @@ def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
             # print('p')
             return d, dType, j, torch.dot(p, tHp), relres
         elif norm_r > torch.sqrt(T*tau**j)*norm_g:
-            print('what')
+            print('Uncomment tensors Y, tHY')
             alpha_new = rr/ptHp
             y_new = y + alpha_new*p            
             tHy_new = tHy + alpha_new*tHp

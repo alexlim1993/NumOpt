@@ -52,44 +52,26 @@ class FFN(nn.Module):
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        self._nn = nn.Sequential(nn.Linear(input_dim, 1024),
+        self._nn = nn.Sequential(nn.Linear(input_dim, 512),
                                  nn.Tanh(),
-                                 nn.Linear(1024, 512),
-                                 nn.Tanh(),
+                                 #nn.Linear(1024, 512),
+                                 #nn.Tanh(),
                                  nn.Linear(512, 256),
                                  nn.Tanh(),
                                  nn.Linear(256, 128),
+                                 #nn.Tanh(),
+                                 #nn.Linear(128, 64),
+                                 #nn.Tanh(),
+                                 #nn.Linear(64, 32),
+                                 #nn.Tanh(),
+                                 #nn.Linear(32, 16),
                                  nn.Tanh(),
-                                 nn.Linear(128, 64),
-                                 nn.Tanh(),
-                                 nn.Linear(64, 32),
-                                 nn.Tanh(),
-                                 nn.Linear(32, 16),
-                                 nn.Tanh(),
-                                 nn.Linear(16, output_dim),
+                                 nn.Linear(128, output_dim),
                                  nn.Softmax(dim = 1))
 
     def forward(self, x):
         return self._nn(x)
         
-class FFNsmaller(nn.Module):
-    
-    """
-    Do not initialise the weights at zeros
-    """
-    
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        self._nn = nn.Sequential(nn.Linear(input_dim, 32),
-                                 nn.Tanh(),
-                                 nn.Linear(32, 16),
-                                 nn.Tanh(),
-                                 nn.Linear(16, output_dim),
-                                 nn.Softmax(dim = 1))
-
-    def forward(self, x):
-        return self._nn(x)
-    
 class RNNet(nn.Module):
     
     def __init__(self, input_dim, hidden_size, layers, depth, output):
@@ -99,7 +81,9 @@ class RNNet(nn.Module):
         self._input_dim = input_dim
         self._nn = nn.Sequential(nn.Linear(layers * hidden_size, depth[0]),
                                  nn.Tanh(),
-                                 nn.Linear(depth[0], output))
+                                 nn.Linear(depth[0], depth[1]),
+                                 nn.Tanh(),
+                                 nn.Linear(depth[1], output))
         self._rnn = nn.RNN(input_dim, hidden_size, layers, batch_first = True)
         
     def forward(self, x):
@@ -154,6 +138,13 @@ class funcWrapper(Wrapper):
     def f(self, w):
         with torch.no_grad():
             return self.func(w)
+            
+    def g(self, w):
+        w = self._gradIt(w)
+        f = self.func(w)
+        g = torch.autograd.grad(f, w)[0]
+        f.detach()
+        return g.detach()
     
     def fg(self, w):
         w = self._gradIt(w)
@@ -176,6 +167,11 @@ class nnWrapper(Wrapper):
         self.func, self.loss = func, loss
     
     def _toModule_toFunctional(self, w):
+        if w.requires_grad:
+            w = w.detach().requires_grad_(True)
+        else:
+            w = w.requires_grad_(True)
+        
         nn.utils.vector_to_parameters(w, self.func.parameters())
         return make_functional(self.func, disable_autograd_tracking = False)
     
@@ -391,20 +387,20 @@ class ObjFunc:
 if __name__ == "__main__":
     from derivativeTest import derivativeTest
     from funcs import logisticFun, logisticModel
-    from regularizers import non_convex
+    #from regularizers import non_convex
     
     trainX = torch.rand((2000, 28 * 28)).to(cTYPE)
     trainY = torch.rand((2000, 10)).to(cTYPE)
-    ffn = FFNsmaller(28 * 28, 10).to(cTYPE)
+    ffn = FFN(28 * 28, 10).to(cTYPE)
     
     loss = nn.MSELoss()
     s = nn.utils.parameters_to_vector(ffn.parameters()).detach()
-    fun = ObjFunc(ffn, loss, trainX, trainY, lambda x : non_convex(x, 0.01), 1, 1)
+    #fun = ObjFunc(ffn, loss, trainX, trainY, None, 1)
     
     # Test to see if the accumulative derivatives are the same as 
     # non-accumulative derivatives and if the derivatives are correct
-    cSPLIT = 200
-    f1, g1, Hv1 = derivativeTest(lambda x : fun(x, "012"), s)
+    # cSPLIT = 20000
+    # f1, g1, Hv1 = derivativeTest(lambda x : fun(x, "012"), s)
     # cSPLIT = 27
     # f2, g2, Hv2 = derivativeTest(lambda x : fun(x, "012"), s)
     # assert torch.all(torch.isclose(f1, f2))

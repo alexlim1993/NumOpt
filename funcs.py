@@ -5,7 +5,7 @@ Created on Thu Nov 24 12:35:21 2022
 @author: uqalim8
 """
 
-import torch, GAN
+import torch
 import math
 from derivativeTest import derivativeTest
 from hyperparameters import cTYPE
@@ -110,31 +110,6 @@ def logisticModel(A, w):
     expc = torch.exp(-c)
     de = expc + torch.exp(- c + expo)
     return expc / de
-
-def logisticFun(x, A, b, reg, order_deriv = "012", H_matrix = False):
-    Ax = torch.mv(A, x)
-    c = torch.maximum(Ax, torch.zeros_like(Ax))
-    expc = torch.exp(-c)
-    expAx = torch.exp(Ax - c)
-    f = torch.sum(c + torch.log(expc + expAx) - b * Ax) + 0.5 * reg * torch.linalg.norm(x)**2
-    
-    if "0" == order_deriv:
-        return f
-    
-    t = expAx/(expc + expAx)
-    if "01" == order_deriv:
-        g = torch.sum((t - b).reshape(-1, 1) * A, axis = 0) + reg * x
-        return f, g
-    
-    g = torch.sum((t - b).reshape(-1, 1) * A, axis = 0) + reg * x
-    
-    if H_matrix:
-        H = A.T @ ((t * (1 - t)).reshape(-1, 1) * A) + reg * torch.eye(len(x))
-        
-    else:
-        H = lambda v : A.T @ ((t * (1 - t)).reshape(-1, 1) * A @ v) + reg * v
-    
-    return f, g, H
 
 if __name__ == "__main__":
     n, d = 1000, 50
