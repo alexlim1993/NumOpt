@@ -7,17 +7,18 @@ Created on Thu Aug 11 10:12:13 2022
 
 import utils, torch
 import hyperparameters as hyper 
+import sys
 
-SEED = None # integers
-FOLDER_PATH = "./test/"
-DATASET = "DelhiClimate" #MNIST, MNISTb, MNISTsb, MNISTs, CIFAR10b, CIFAR10, DelhiClimate
-FUNC = "rnnMSE" #"GAN", "logloss", "nls", "ffnnMSE", "ffnnCELoss", "rnnMSE", "rnnCELoss"
+SEED = 3001 # integers
+FOLDER_PATH = "./test/" #f"./{sys.argv[1]}"
+DATASET = "CIFAR10" #MNIST, MNISTb, MNISTsb, MNISTs, CIFAR10b, CIFAR10, DelhiClimate, Ethylene, Covtype
+FUNC = "ffnnMSE" #"GAN", "logloss", "nls", "ffnnMSE", "ffnnCELoss", "rnnMSE", "rnnCELoss", "rnnCovtypeMSE"
 INITX0 = "torch" #zeros, ones, uniform, normal, torch
 REG = "None" # None, 2-norm, Non-convex
 REG_LAMBDA = 10e-2
 VERBOSE = True
-CUDA = False
-HSUB = [1] #[1, 0.1, 0.05, 0.01]
+HSUB = 0.1 #[1, 0.1, 0.05, 0.01]
+MINI = 1
 
 ALG = [
        #("Linesearch_GD", hyper.cGD),
@@ -26,55 +27,26 @@ ALG = [
        #("NewtonCG_NC", hyper.cCG_NC),
        #("NewtonCG_NC_FW", hyper.cCG_NC),
        #("NewtonCG_TR_Steihaug", hyper.cTR_STEI)
+       #("L-BFGS", hyper.cL_BFGS)
        ]
 
-# if FUNC == "GAN":
-#     ALGG = "NewtonMR_NC"
-#     CONSTG = hyper.cMR
-#     CONSTG.Hsub = HSUB[0]
     
-#     ALGD = "NewtonMR_NC"
-#     CONSTD = hyper.cMR
-#     CONSTD.Hsub = HSUB[0]
+def run(folder_path, dataset, alg, func, x0, mini, Hsub, reg, lamb, verbose):
     
-def run(folder_path, dataset, alg, func, x0, Hsub, reg, lamb, verbose, gpu):
-    
-    assert type(Hsub) == list
     assert type(alg) == list
-    
-    if gpu:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device("cpu")
         
-    print("***Running on", str(device) + "***")
+    print("\n***Running on", str(hyper.cCUDA) + "***\n")
     
     for j, c in alg:
-        for i in Hsub:
-            print("\n" + 45 * ".")
-            c.Hsub = i
-            algo, x0 = utils.execute(folder_path, dataset, j, func, x0, i, reg, lamb, c, verbose, device)
-            utils.saveRecords(folder_path, dataset, j, func, i, algo.record)
-
-def runGAN(folder_path, dataset, algG, algD, constG, constD, Hsub, reg, lamb, gpu):
         
-    if gpu:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device("cpu")
-        
-    print("***Running on", str(device) + "***")
+        print("\n" + 45 * ".")
+        c.Hsub = Hsub
+        algo, x0 = utils.execute(folder_path, dataset, j, func, x0, mini, Hsub, reg, lamb, c, verbose)
+        utils.saveRecords(folder_path, dataset, j, func, Hsub, algo.record)
 
-    utils.executeGAN(folder_path, dataset, algG, algD, Hsub, reg, lamb, constG, constD, device)
-            
 if __name__ == "__main__":
     
     if type(SEED) == int:
         torch.manual_seed(SEED)
     
-    run(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, VERBOSE, CUDA)
-    
-    # if FUNC == "GAN":
-    #     runGAN(FOLDER_PATH, DATASET, ALGG, ALGD, CONSTG, CONSTD, HSUB[0], REG, REG_LAMBDA, CUDA)
-    # else:
-    #     run(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, VERBOSE, CUDA)
+    run(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, MINI, HSUB, REG, REG_LAMBDA, VERBOSE)

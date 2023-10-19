@@ -4,17 +4,17 @@ Created on Fri Oct 21 12:15:49 2022
 
 @author: uqalim8
 """
+
 import torch
 
 def backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
     betagp = torch.dot(gk, pk) * beta
-    j = 0
+    j = 1
     while fun(xk + alpha * pk) > fk + alpha * betagp and j < maxite:
         alpha *= rho
         j += 1
     if j >= maxite:
-        print("linesearch max acheived!")
-        
+        print("linesearch max exceeded!")
     return alpha, j
 
 def backForwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
@@ -22,18 +22,22 @@ def backForwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite):
     if fun(xk + alpha * pk) > fk + alpha * betagp:
         return backwardArmijo(fun, xk, fk, gk, alpha, pk, beta, rho, maxite)
     else:
-        j = 0
+        j = 1
         while fun(xk + alpha * pk) <= fk + alpha * betagp and j < maxite:
             alpha /= rho
             j += 1
-        return rho * alpha, j
+        if j >= maxite:
+            print("linesearch max exceeded!")
+    return rho * alpha, j
 
 def dampedNewtonCGLinesearch(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite):
     const = beta * normpk / 6
-    j = 0
+    j = 1
     while fun(xk + alpha * pk) > fk - const * (alpha ** 3) and j < maxite:
         alpha *= rho
         j += 1
+    if j >= maxite:
+        print("linesearch max exceeded!")
     return alpha, j
 
 def dampedNewtonCGbackForwardLS(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite):
@@ -41,10 +45,12 @@ def dampedNewtonCGbackForwardLS(fun, xk, fk, alpha, pk, normpk, beta, rho, maxit
     if fun(xk + alpha * pk) > fk - const * (alpha ** 3):
         return dampedNewtonCGLinesearch(fun, xk, fk, alpha, pk, normpk, beta, rho, maxite)
     else:
-        j = 0
+        j = 1
         while fun(xk + alpha * pk) <= fk - const * (alpha ** 3) and j < maxite:
             alpha = 2 * alpha
             j += 1
+        if j >= maxite:
+            print("linesearch max exceeded!")
         return alpha / 2, j
 
 def lineSearchWolfeStrong(objFun, xk, pk, alpha0 = 1, c1=1e-4, c2=0.9, linesearchMaxItrs=200):

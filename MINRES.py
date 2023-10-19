@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sat Jun 13 17:48:45 2020
+
 MINRES with NPC detection
+
 @author: Yang Liu
 """
 
@@ -144,11 +146,12 @@ def myMINRES(A, b, rtol, maxit, shift=0,
             flag = 1  ## trustful least square solution
             return xl, relres, iters, rtl, dType
         
-        if nc >= 0: # NPC detection
-            flag = 3
-            dType = 'NC'
-            return xl, relres, iters, rtl, dType        
+        # if nc >= 0: # NPC detection
+        #     flag = 3
+        #     dType = 'NC'
+        #     return xl, relres, iters, rtl, dType        
         
+        print(iters, torch.norm(rtl - (b - Ax(A, xl))))
         if gamma2 > isZero:
             x, w, wl, rt, tau, phi = updates(gamma2, cs, sn, phi, vn, v, w, 
                                              wl, epsilon, delta2, xl, rtl)
@@ -225,3 +228,7 @@ def symGivens(a, b, device="cpu"):
         s = c * t
         r = a / c
     return c, s, r
+
+    
+    
+    

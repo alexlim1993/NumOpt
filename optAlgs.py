@@ -4,15 +4,88 @@ Created on Mon Oct 24 18:31:13 2022
 
 @author: uqalim8
 """
+
 from linesearch import (backwardArmijo, 
                         backForwardArmijo, 
                         dampedNewtonCGLinesearch, 
                         dampedNewtonCGbackForwardLS, 
                         lineSearchWolfeStrong)
-import torch
-from optimizer import *
+import torch, time
 from CG import CG, CappedCG, CGSteihaug
 from MINRES import myMINRES
+from hyperparameters import cTYPE, cCUDA
+
+GD_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", 
+            "g_norm":".4e", "alpha":".2e", "acc":".2f"}
+
+SGD_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", 
+            "g_norm":".4e", "acc":".2f"}
+
+NEWTON_STATS = {"ite":"g", "inite":"g", "orcs":"g", "time":".2f", 
+                "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
+
+NEWTON_NC_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
+
+NEWTON_TR_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "delta":".2e", "acc":".2f"}
+
+L_BFGS_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", "g_norm":".4e", 
+                "alpha":".2e", "acc":".2f"}
+
+class Optimizer:
+    
+    def __init__(self, fun, x0, alpha0, gradtol, maxite, maxorcs):
+        self.fun = fun
+        self.xk = x0
+        self.alpha0 = alpha0
+        self.maxorcs = maxorcs
+        self.k, self.orcs, self.toc, self.lineite = 0, 0, 0, 0
+        self.gknorm, self.record = None, None
+        self.maxite = maxite
+        self.gradtol = gradtol
+        self.record = dict(((i, []) for i in self.info.keys()))
+        
+    def recording(self, stats):
+        for n, i in enumerate(self.record.keys()):
+            self.record[i].append(stats[n])
+            
+    def printStats(self):
+        if self.k == 0:
+            print(7 * len(self.info) * "..")
+            form = ["{:^13}"] * len(self.info)
+            print("|".join(form).format(*self.info.keys()))
+            print(7 * len(self.info) * "..")
+        form = ["{:^13" + i + "}" for i in self.info.values()]
+        print("|".join(form).format(*(self.record[i][-1] for i in self.info.keys())))        
+    
+    def progress(self, verbose, pred, skip = 1):
+        self.k += 1
+        self.oracleCalls()
+        self.recordStats(pred(self.xk))
+        if verbose and self.k % skip == 0:
+            self.printStats()
+
+    def termination(self):
+        return self.k >= self.maxite or self.gknorm <= self.gradtol or self.orcs >= self.maxorcs
+    
+    def optimize(self, verbose, pred):
+        self.recordStats(pred(self.xk))
+        self.printStats()
+        while not self.termination():
+            tic = time.time()
+            self.step()
+            self.toc += time.time() - tic
+            self.progress(verbose, pred)
+
+    def recordStats(self):
+        raise NotImplementedError
+        
+    def step(self):
+        raise NotImplementedError
+    
+    def oracleCalls(self):
+        raise NotImplementedError
 
 class linesearchGD(Optimizer):
     
@@ -42,6 +115,63 @@ class linesearchGD(Optimizer):
         
     def oracleCalls(self):
         self.orcs += 2 + self.lineite
+        
+class MiniBatchSGD(Optimizer):
+    
+    def __init__(self, fun, x0, gradtol, maxite, maxorcs, mini, alpha = 0.001):
+        super().__init__(fun, x0, alpha, gradtol, maxite, maxorcs)
+        self.info = SGD_STATS
+    
+    def step(self):
+        self.gk = self.fun(self.xk, "1")
+        self.xk -= self.alpha * self.gk
+        
+    def recordStats(self, acc):
+        if self.k == 0:
+            self.fk, self.gk = self.fun(self.xk, "01")
+            self.inite = 0
+            self.gknorm = torch.linalg.norm(self.gk, 2)
+            self.recording((0, 0, 0, float(self.fk), float(self.gknorm), acc))
+        else:
+            self.recording((self.k, self.orcs, self.toc, 
+                               float(self.fk), float(self.gknorm), acc))
+                
+    def oracleCalls(self):
+        self.orcs += 2 
+    
+class Adam(Optimizer):
+    
+    def __init__(self, fun, x0, gradtol, maxite, maxorcs, mini, 
+                 alpha = 0.001, beta1 = 0.9, beta2 = 0.999, epsilon = 10e-8):
+        self.info = SGD_STATS
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.m = torch.zeros_like(x0, dtype = cTYPE, device = cCUDA)
+        self.v = torch.zeros_like(x0, dtype = cTYPE, device = cCUDA)
+        super().__init__(fun, x0, alpha, gradtol, maxite, maxorcs)
+        
+    def step(self):
+        self.fk, self.gk = self.fun(self.xk, "01")
+        self.m = self.beta1 * self.m + (1 - self.beta1) * self.gk
+        self.v = self.beta2 * self.v + (1 - self.beta2) * (self.gk ** 2)
+        mp = self.m / (1 - self.beta1 ** (self.k + 1))
+        vp = self.v / (1 - self.beta2 ** (self.k + 1))
+        self.xk -= self.alpha0 * mp / (torch.sqrt(vp) - self.epsilon)
+        self.gknorm = torch.linalg.norm(self.gk, 2)
+        
+    def recordStats(self, acc):
+        if self.k == 0:
+            self.fk, self.gk = self.fun(self.xk, "01")
+            self.inite = 0
+            self.gknorm = torch.linalg.norm(self.gk, 2)
+            self.recording((0, 0, 0, float(self.fk), float(self.gknorm), acc))
+        else:
+            self.recording((self.k, self.orcs, self.toc, 
+                               float(self.fk), float(self.gknorm), acc))
+            
+    def oracleCalls(self):
+        self.orcs += 2 
         
 class NewtonCG(Optimizer):
     
@@ -149,7 +279,8 @@ class NewtonMR_NC(Optimizer):
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
         
     def step(self):
-        pk, _, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, maxit = self.inmaxite)
+        pk, _, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, self.restol, 
+                                                    self.inmaxite, shift = 0.1)
         if self.dtype == "Sol" or self.dtype == "MAX":
             self.alphak, self.lineite = backwardArmijo(lambda x : self.fun(x, "0"), 
                                                        self.xk, self.fk, self.gk, self.alpha0, pk, 
@@ -181,7 +312,7 @@ class NewtonMR_NC(Optimizer):
         
 class NewtonCG_TR_Steihaug(Optimizer):
     
-    def __init__(self, fun, x0, alpha0, gradtol, maxite, maxorcs, restol, inmaxite, 
+    def __init__(self, fun, x0, gradtol, maxite, maxorcs, restol, inmaxite, 
                  deltaMax, delta0, eta, eta1, eta2, gamma1, gamma2, Hsub):
         
         if not (0 < eta1 and eta1 <= eta2 and eta2 < 1 and eta < eta1):
@@ -224,7 +355,7 @@ class NewtonCG_TR_Steihaug(Optimizer):
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, "None", 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, acc))
+                             float(self.gknorm), self.delta, acc))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((self.k, self.inite, self.dtype, self.orcs, 
@@ -239,22 +370,21 @@ class L_BFGS(Optimizer):
         self.info = L_BFGS_STATS
         self.m = m
         self.lineMaxite = lineMaxite
-        self.s, self.y = [], []
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
-    
-    def _twoloop(self, w, s, y):
-        alpha, rho = [], []
-        for si, yi in zip(s[::-1], y[::-1]):
-            rho.append(1/(torch.dot(si, yi)))
-            alpha.append(rho[-1] * (torch.dot(si, w)))
-            w = w - alpha[-1] * yi
+        
+    def _twoloop(self, w):
+        k = self.s.shape[0]
+        alpha, rho = torch.zeros(k, dtype = cTYPE), torch.zeros(k, dtype = cTYPE)
+        for i in range(k):
+            rho[i] = 1 / torch.dot(self.s[i], self.y[i])
+            alpha[i] = rho[i] * torch.dot(self.s[i], w)
+            w = w - alpha[i] * self.y[i]
             
-        w = ((torch.dot(s[-1], y[-1])) / torch.dot(y[-1], y[-1])) * w
-        k = len(s) - 1
-        for si, yi in zip(s, y):
-            beta = rho[k] * (torch.dot(yi, w))
-            w = w + (alpha[k] - beta) * si
-            k -= 1
+        w = ((torch.dot(self.s[0], self.y[0])) / torch.dot(self.y[0], self.y[0])) * w
+        for i in range(k - 1, -1, -1):
+            beta = rho[i] * torch.dot(self.y[i], w)
+            w = w + (alpha[i] - beta) * self.s[i]
+
         return w
     
     def step(self):
@@ -262,19 +392,30 @@ class L_BFGS(Optimizer):
         if not self.k:
             pk = -self.gk
         else:
-            pk = self._twoloop(-self.gk, self.s, self.y)
+            pk = self._twoloop(-self.gk)
         
         self.alpha, self.lineite = lineSearchWolfeStrong(lambda x : self.fun(x, "01"), self.xk, pk, 
                                                          self.alpha0, 1e-4, 0.9, self.lineMaxite)
         xkp1 = self.xk + self.alpha * pk
+        xkp1.detach()
         self.fk, gkp1 = self.fun(xkp1, "01")
-        self.s.append(xkp1 - self.xk)
-        self.y.append(gkp1 - self.gk)
+
+        if self.k and self.s.shape[0] >= self.m:
+            self.s = self.s[:-1]
+            self.y = self.y[:-1]
+            
+        temps = xkp1 - self.xk
+        tempy = gkp1 - self.gk     
+        
+        if not self.k:
+            self.s = temps.reshape(1, -1)
+            self.y = tempy.reshape(1, -1)
+        else:
+            self.s = torch.cat([temps.reshape(1, -1), self.s], dim = 0)
+            self.y = torch.cat([tempy.reshape(1, -1), self.y], dim = 0)
+            
         self.gk = gkp1
         self.xk = xkp1
-        if len(self.s) > self.m:
-            self.s = self.s[1:]
-            self.y = self.y[1:]
 
     def recordStats(self, acc):
         if self.k == 0:
@@ -286,7 +427,7 @@ class L_BFGS(Optimizer):
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((self.k, self.orcs, self.toc, float(self.fk), 
-                            float(self.gknorm), self.alpha, acc))  
+                            float(self.gknorm), float(self.alpha), acc))  
             
     def oracleCalls(self):
         self.orcs += 2 + 2 * self.lineite
@@ -297,56 +438,63 @@ if __name__ == "__main__":
     
     A_train, b_train, *_ = loadData()
     fun = lambda x, v : logisticFun(x, A_train, b_train, 1, v)
-    x0 = torch.zeros(A_train.shape[-1], dtype = torch.float64)
+    x0 = torch.zeros(A_train.shape[-1], dtype = cTYPE)
     Lg = torch.linalg.matrix_norm(A_train, 2)**2 / 4 + 1
     
     def pred(x):
         b_pred = torch.round(logisticModel(A_train, x))
         return torch.sum(b_train == b_pred) / len(b_train) * 100
     
-    print("=================== LineSearch GD ========================")
-    optGD = linesearchGD(fun, x0.clone(), 10/Lg, 10e-4, 1000, 1000, 100, 10e-4, 0.9)
-    optGD.optimize(True, pred)
-    print("=================== Newton CG ========================")
-    optNEWTON = NewtonCG(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 100, 100, 10e-4, 0.9)
-    optNEWTON.optimize(True, pred)
+    # print("=================== LineSearch GD ========================")
+    # optGD = linesearchGD(fun, x0.clone(), 10/Lg, 10e-4, 1000, 1000, 100, 10e-4, 0.9)
+    # optGD.optimize(True, pred)
     
-    print("=================== Newton MR NC ========================")
-    optNEWTONMR = NewtonMR_NC(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 100, 100, 10e-4, 0.9, 10e-4, 1)
-    optNEWTONMR.optimize(True, pred)
+    # print("=================== Adam ========================")
+    # optAD = Adam(fun, x0.clone(), 10e-4, 1000, 1000)
+    # optAD.optimize(True, pred)
     
-    print("=================== Newton CG NC ========================")
-    optNEWTONCG = NewtonCG_NC(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 100, 100, 10e-4, 0.9, 10e-4, 1)
-    optNEWTONCG.optimize(True, pred)
+    # print("=================== Newton CG ========================")
+    # optNEWTON = NewtonCG(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 100, 100, 10e-4, 0.9)
+    # optNEWTON.optimize(True, pred)
+    
+    # print("=================== Newton MR NC ========================")
+    # optNEWTONMR = NewtonMR_NC(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 100, 100, 10e-4, 0.9, 10e-4, 1)
+    # optNEWTONMR.optimize(True, pred)
+    
+    # print("=================== Newton CG NC ========================")
+    # optNEWTONCG = NewtonCG_NC(fun, x0.clone(), 1, 10e-4, 1000, 1000, 10e-2, 1000, 1000, 10e-4, 0.9, 10e-4, 1)
+    # optNEWTONCG.optimize(True, pred)
     
     print("=================== L-BFGS ========================")
     optL_BFGS = L_BFGS(fun, x0.clone(), 1, 10e-4, 20, 1000, 1000, 1000)
     optL_BFGS.optimize(True, pred)
     
-    print("=================== Newton TR ========================")
-    optNewtonTR = NewtonCG_TR_Steihaug(fun, x0.clone(), None, 10e-4, 1000, 1000, 
-                                       10e-2, 100, 1e10, 1e5, 1/8, 0.25, 0.75, 0.25, 2, 1)
-    optNewtonTR.optimize(True, pred)
+    # print("=================== Newton TR ========================")
+    # optNewtonTR = NewtonCG_TR_Steihaug(fun, x0.clone(), 10e-4, 1000, 1000, 
+    #                                    10e-2, 1000, 1e10, 1e5, 1/8, 0.25, 0.75, 0.25, 2, 1)
+    # optNewtonTR.optimize(True, pred)
     
     import matplotlib.pyplot as plt
     
     fig = plt.figure()
-    plt.loglog(torch.tensor(optGD.record["orcs"]) + 1, optGD.record["f"], label = "GD")
-    plt.loglog(torch.tensor(optNEWTON.record["orcs"]) + 1, optNEWTON.record["f"], label = "NewtonCG")
-    plt.loglog(torch.tensor(optNEWTONMR.record["orcs"]) + 1, optNEWTONMR.record["f"], label = "NewtonMR_NC")
-    plt.loglog(torch.tensor(optNEWTONCG.record["orcs"]) + 1, optNEWTONCG.record["f"], label = "NewtonCG_NC")
-    plt.loglog(torch.tensor(optNewtonTR.record["orcs"]) + 1, optNewtonTR.record["f"], label = "NewtonTR")
+    # plt.loglog(torch.tensor(optGD.record["orcs"]) + 1, optGD.record["f"], label = "GD")
+    # plt.loglog(torch.tensor(optAD.record["orcs"]) + 1, optAD.record["f"], label = "Adam")
+    # plt.loglog(torch.tensor(optNEWTON.record["orcs"]) + 1, optNEWTON.record["f"], label = "NewtonCG")
+    # plt.loglog(torch.tensor(optNEWTONMR.record["orcs"]) + 1, optNEWTONMR.record["f"], label = "NewtonMR_NC")
+    # plt.loglog(torch.tensor(optNEWTONCG.record["orcs"]) + 1, optNEWTONCG.record["f"], label = "NewtonCG_NC")
+    # plt.loglog(torch.tensor(optNewtonTR.record["orcs"]) + 1, optNewtonTR.record["f"], label = "NewtonTR")
     plt.loglog(torch.tensor(optL_BFGS.record["orcs"]) + 1, optL_BFGS.record["f"], label = "L_BFGS")
 
     plt.legend()
     plt.show()
     
     fig = plt.figure()
-    plt.loglog(torch.tensor(optGD.record["orcs"]) + 1, optGD.record["g_norm"], label = "GD")
-    plt.loglog(torch.tensor(optNEWTON.record["orcs"]) + 1, optNEWTON.record["g_norm"], label = "NewtonCG")
-    plt.loglog(torch.tensor(optNEWTONMR.record["orcs"]) + 1, optNEWTONMR.record["g_norm"], label = "NewtonMR_NC")
-    plt.loglog(torch.tensor(optNEWTONCG.record["orcs"]) + 1, optNEWTONCG.record["g_norm"], label = "NewtonCG_NC")
-    plt.loglog(torch.tensor(optNewtonTR.record["orcs"]) + 1, optNewtonTR.record["g_norm"], label = "NewtonTR")
+    # plt.loglog(torch.tensor(optGD.record["orcs"]) + 1, optGD.record["g_norm"], label = "GD")
+    # plt.loglog(torch.tensor(optAD.record["orcs"]) + 1, optAD.record["g_norm"], label = "Adam")
+    # plt.loglog(torch.tensor(optNEWTON.record["orcs"]) + 1, optNEWTON.record["g_norm"], label = "NewtonCG")
+    # plt.loglog(torch.tensor(optNEWTONMR.record["orcs"]) + 1, optNEWTONMR.record["g_norm"], label = "NewtonMR_NC")
+    # plt.loglog(torch.tensor(optNEWTONCG.record["orcs"]) + 1, optNEWTONCG.record["g_norm"], label = "NewtonCG_NC")
+    # plt.loglog(torch.tensor(optNewtonTR.record["orcs"]) + 1, optNewtonTR.record["g_norm"], label = "NewtonTR")
     plt.loglog(torch.tensor(optL_BFGS.record["orcs"]) + 1, optL_BFGS.record["g_norm"], label = "L_BFGS")
 
     plt.legend()
