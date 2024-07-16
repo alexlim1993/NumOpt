@@ -25,14 +25,14 @@ SGD_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e",
 NEWTON_STATS = {"ite":"g", "inite":"g", "orcs":"g", "time":".2f", 
                 "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".2f"}
 
-NEWTON_NC_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
-                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc":".4e"}
+NEWTON_NC_STATS = {"ite":"g", "inite":"g", "relr":".4e", "relHr":".4e", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "alpha":".2e", "acc_train":".2f", "acc_val":".2f", "train_improv":".4e", "test_improv":".4e"}
 
-NEWTON_TR_STATS = {"ite":"g", "inite":"g", "dtype":"", "orcs":"g", "time":".2f",
-                   "f":".4e", "g_norm":".4e", "delta":".2e", "acc":".2f"}
+NEWTON_TR_STATS = {"ite":"g", "inite":"g", "relr":".4e", "relHr":".4e", "dtype":"", "orcs":"g", "time":".2f",
+                   "f":".4e", "g_norm":".4e", "delta":".2e", "acc_train":".2f", "acc_val":".2f"}
 
 L_BFGS_STATS = {"ite":"g", "orcs":"g", "time":".2f", "f":".4e", "g_norm":".4e", "iteLS":"g", 
-                "alpha":".2e", "acc":".2f"}
+                "alpha":".2e", "acc_train":".2f", "acc_val":".2f"}
 
 class Optimizer:
     
@@ -232,7 +232,7 @@ class NewtonCG_NC(Optimizer):
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
     
     def step(self):
-        pk, self.dtype, self.inite, pHp, _ = CappedCG(self.hk, -self.gk, self.restol, self.epsilon, self.inmaxite)
+        pk, self.dtype, self.inite, pHp, self.relr, self.relHr = CappedCG(self.hk, -self.gk, self.restol, self.epsilon, self.inmaxite)
         normpk = torch.linalg.norm(pk, 2)**3
         if self.dtype == "NC":
             pk = - torch.sign(torch.dot(pk, self.gk)) * abs(pHp) * pk / normpk
@@ -247,12 +247,13 @@ class NewtonCG_NC(Optimizer):
             self.fk, self.gk, self.hk = self.fun(self.xk, "012")
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((0, 0, "None", 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, acc))
+            self.recording((0, 0, 0, 0, "None", 0, 0, float(self.fk), 
+                             float(self.gknorm), 0, acc[0], acc[1]))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((self.k, self.inite, self.dtype, self.orcs, 
-                               self.toc, float(self.fk), float(self.gknorm), self.alphak, acc))
+            self.recording((self.k, self.inite, float(self.relr), float(self.relHr), 
+                               self.dtype, self.orcs, self.toc, float(self.fk), 
+                               float(self.gknorm), self.alphak, acc[0], acc[1]))
             
     def oracleCalls(self):
         self.orcs += 2 + 2 * self.inite * self.Hsub + self.lineite
@@ -275,7 +276,7 @@ class NewtonCG_NC_FW(NewtonCG_NC):
          
 class NewtonMR_NC(Optimizer):
     
-    def __init__(self, fun, x0, alpha0, gradtol, maxite, maxorcs, restol, inmaxite, 
+    def __init__(self, fun, x0, alpha0, gradtol, maxite, maxorcs, restol, inmaxite, sigma,
                  lineMaxite, lineBetaB, lineRho, lineBetaFB, Hsub):
         self.info = NEWTON_NC_STATS
         self.restol = restol
@@ -284,17 +285,14 @@ class NewtonMR_NC(Optimizer):
         self.lineBetaB = lineBetaB
         self.lineRho = lineRho
         self.lineBetaFB = lineBetaFB
+        self.sigma = sigma
         self.Hsub = Hsub
         self.alpha_npc = 1
         super().__init__(fun, x0, alpha0, gradtol, maxite, maxorcs)
         
     def step(self):
-        pk, self.relr, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, maxit = self.inmaxite)
-
-        #if self.dtype == "NC":
-        #    self.restol *= 1.1
-        #if self.dtype == "Sol":
-        #    self.restol /= 1.1
+        pk, self.relr, self.relHr, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, 
+                                                            maxit = self.inmaxite, sigma = self.sigma)
         
         if self.dtype == "Sol" or self.dtype == "MAX":
             self.alphak, self.lineite = backwardArmijo(lambda x : self.fun(x, "0"), 
@@ -315,33 +313,20 @@ class NewtonMR_NC(Optimizer):
             self.fk, self.gk, self.hk = self.fun(self.xk, "012")
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((0, 0, "None", 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, 0))
+            self.recording((0, 0, 0, 0, "None", 0, 0, float(self.fk), 
+                             float(self.gknorm), 0, acc[0], acc[1], 0., 0.))
+            self.acc0 = acc[0]
+            self.acc1 = acc[1]
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((self.k, self.inite, self.dtype, self.orcs, 
-                               self.toc, float(self.fk), float(self.gknorm), 
-                               self.alphak, float(acc)))
+            self.recording((self.k, self.inite, float(self.relr), float(self.relHr),
+                               self.dtype, self.orcs, self.toc, float(self.fk), float(self.gknorm), 
+                               self.alphak, acc[0], acc[1], (self.acc0 - acc[0])/5828, (self.acc1 - acc[1])/40000))
+            self.acc0 = acc[0]
+            self.acc1 = acc[1]
         
     def oracleCalls(self):
         self.orcs += 2 + 2 * self.inite * self.Hsub + self.lineite
-
-class NewtonMR_NC_no_LS(NewtonMR_NC):
-
-    def step(self):
-        pk, self.relr, self.inite, r, self.dtype = myMINRES(self.hk, -self.gk, rtol = self.restol, maxit = self.inmaxite)
-
-        if not (self.dtype == "Sol" or self.dtype == "MAX"):
-           self.alphak = self.alpha0
-           pk = r 
-        else:
-           self.alphak = 1
-
-        self.xk += self.alphak * pk
-        self.fk, self.gk, self.hk = self.fun(self.xk, "012")
-
-    def oracleCalls(self):
-        self.orcs += 2 + 2 * self.inite * self.Hsub
         
 class NewtonCG_TR_Steihaug(Optimizer):
     
@@ -368,7 +353,7 @@ class NewtonCG_TR_Steihaug(Optimizer):
         super().__init__(fun, x0, 0, gradtol, maxite, maxorcs)
         
     def step(self):
-        pk, self.dtype, m, self.inite = CGSteihaug(self.hk, self.gk, self.delta, self.restol, self.inmaxite)
+        pk, self.relr, self.relHr, self.dtype, m, self.inite = CGSteihaug(self.hk, self.gk, self.delta, self.restol, self.inmaxite)
         self.rho = (self.fk - self.fun(self.xk + pk, "0")) / m
         
         if self.rho < self.eta1:
@@ -387,12 +372,12 @@ class NewtonCG_TR_Steihaug(Optimizer):
             self.fk, self.gk, self.hk = self.fun(self.xk, "012")
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((0, 0, "None", 0, 0, float(self.fk), 
-                             float(self.gknorm), self.delta, acc))
+            self.recording((0, 0, 0, 0, "None", 0, 0, float(self.fk), 
+                             float(self.gknorm), self.delta, acc[0], acc[1]))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
-            self.recording((self.k, self.inite, self.dtype, self.orcs, 
-                               self.toc, float(self.fk), float(self.gknorm), self.delta, acc))  
+            self.recording((self.k, self.inite, float(self.relr), float(self.relHr), self.dtype, self.orcs, 
+                               self.toc, float(self.fk), float(self.gknorm), self.delta, acc[0], acc[1]))  
             
     def oracleCalls(self):
         self.orcs += 2 + 2 * self.inite * self.Hsub + 2
@@ -460,11 +445,11 @@ class L_BFGS(Optimizer):
             self.inite = 0
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((0, 0, 0, float(self.fk), 
-                             float(self.gknorm), 0, 0, acc))
+                             float(self.gknorm), 0, 0, acc[0], acc[1]))
         else:
             self.gknorm = torch.linalg.norm(self.gk, 2)
             self.recording((self.k, self.orcs, self.toc, float(self.fk), 
-                            float(self.gknorm), self.lineite, float(self.alpha), acc))  
+                            float(self.gknorm), self.lineite, float(self.alpha), acc[0], acc[1]))  
             
     def oracleCalls(self):
         self.orcs += 2 + self.lineorcs

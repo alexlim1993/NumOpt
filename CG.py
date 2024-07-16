@@ -34,8 +34,12 @@ def CGSteihaug(H, g, delta, tol, maxite):
     
     j = 0
     d, r = -g.clone(), g.clone()
+    norm_g = torch.norm(g)
+    norm_r = norm_g
+    Bd = Ax(H, d)
+    norm_Hg = torch.norm(Bd)
+    norm_Hr = norm_Hg
     while j <= maxite:
-        Bd = Ax(H, d)
         dBd = torch.dot(d, Bd)
         j += 1
         if dBd <= 0:
@@ -45,7 +49,7 @@ def CGSteihaug(H, g, delta, tol, maxite):
             tau = numerator / norm_d**2
             p = z + tau * d
             m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
-            return p, "NC", m0_mk, j
+            return p, norm_r / norm_g, norm_Hr / norm_Hg, "NC", m0_mk, j
         
         norm_r = torch.dot(r, r)
         alpha = norm_r / dBd
@@ -57,24 +61,27 @@ def CGSteihaug(H, g, delta, tol, maxite):
             tau = numerator / norm_d**2
             p = z + tau * d
             m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
-            return p, "SOL,=", m0_mk, j
+            return p, norm_r / norm_g, norm_Hr / norm_Hg, "SOL,=", m0_mk, j
 
         z = zp1
         r = r + alpha * Bd
         if torch.norm(r) < tol:
             p = z
             m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
-            return p, "SOL,<", m0_mk, j
+            return p, norm_r / norm_g, norm_Hr / norm_Hg, "SOL,<", m0_mk, j
         
         norm_rp1 = torch.dot(r, r)
         beta = norm_rp1 / norm_r
         d = -r + beta * d
         norm_r = norm_rp1
-    
+        Bdkp1 = Ax(H, d)
+        norm_Hr = torch.norm(Bdkp1 - beta * Bd)
+        Bd = Bdkp1
+     
     p = z
     m0_mk = - torch.dot(g, p) - torch.dot(p, Ax(H, p)) / 2
 
-    return p, "MAX,<", m0_mk, j
+    return p, norm_r / norm_g, norm_Hr / norm_Hg, "MAX,<", m0_mk, j
         
 
 def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
@@ -97,8 +104,9 @@ def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
     if ptHp < epsilon*norm_p**2:
         d = p
         dType = 'NC'
-        return d, dType, j, ptHp, 1
+        return d, dType, j, ptHp, 1, 1
     norm_Hp = torch.norm(tHp - 2*epsilon*p)
+    norm_Hb = norm_Hp
     if norm_Hp > M*norm_p:
         M = norm_Hp/norm_p
         kappa, tzeta, tau, T = para(M, epsilon, zeta)    
@@ -140,16 +148,16 @@ def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
             d = y
             dType = 'NC'
             # print('y')
-            return d, dType, j, torch.dot(y, tHy), relres
+            return d, dType, j, torch.dot(y, tHy), relres, norm_Hr / norm_Hb
         elif norm_r < tzeta*norm_g:
             # print('relres', relres)
             d = y
-            return d, dType, j, 0, relres
+            return d, dType, j, 0, relres, norm_Hr / norm_Hb
         elif torch.dot(p, tHp) < epsilon*norm_p**2:
             d = p
             dType = 'NC'
             # print('p')
-            return d, dType, j, torch.dot(p, tHp), relres
+            return d, dType, j, torch.dot(p, tHp), relres, norm_Hr / norm_Hb
         elif norm_r > torch.sqrt(T*tau**j)*norm_g:
             print('Uncomment tensors Y, tHY')
             alpha_new = rr/ptHp
@@ -162,9 +170,9 @@ def CappedCG(H, b, zeta, epsilon, maxiter, M=0):
                     d = dy
                     dType = 'NC'
                     print('dy')
-                    return d, dType, j, torch.dot(dy, dtHy), relres
+                    return d, dType, j, torch.dot(dy, dtHy), relres, norm_Hr / norm_Hb
     print('Maximum iteration exceeded!')
-    return y, dType, j, 0, relres
+    return y, dType, j, 0, relres, norm_Hr / norm_Hb
 
 def para(M, epsilon, zeta):
     # if torch.tensor(M):

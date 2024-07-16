@@ -92,18 +92,19 @@ def CIFAR10(folder_path, one_hot, classes):
     train_set = datasets.CIFAR10("./", train = True, download = True)
     test_set = datasets.CIFAR10("./", train = False, download = True)
     
-    X = torch.cat([torch.tensor(train_set.data.reshape(train_set.data.shape[0], -1), dtype = cTYPE),
-                   torch.tensor(test_set.data.reshape(test_set.data.shape[0], -1), dtype = cTYPE)], dim = 0) 
-    Y = torch.cat([torch.tensor(train_set.targets), torch.tensor(test_set.targets)], dim = 0) % classes
+    trainX = torch.tensor(train_set.data.reshape(train_set.data.shape[0], -1), dtype = cTYPE) / 255
+    trainY = torch.tensor(train_set.targets) % classes
+    testX = torch.tensor(test_set.data.reshape(test_set.data.shape[0], -1), dtype = cTYPE) / 255
+    testY = torch.tensor(test_set.targets) % classes
     del train_set, test_set
-     
-    X /= 255
     
     if one_hot:
-        Y = torch.nn.functional.one_hot(Y.long(), classes)
+        trainY = torch.nn.functional.one_hot(trainY.long(), classes)
+        testY = torch.nn.functional.one_hot(testY.long(), classes)
     
-    print(TEXT.format("data size", str(tuple(X.shape))))
-    return X, Y.to(cTYPE), None, None
+    print(TEXT.format("Training Samples", str(tuple(trainX.shape))))
+    print(TEXT.format("Test Samples", str(tuple(testX.shape))))
+    return trainX, trainY.to(cTYPE), testX, testY.to(cTYPE)
         
 def DelhiClimate(window = 7):
     
@@ -111,8 +112,8 @@ def DelhiClimate(window = 7):
     train = torch.tensor(train.drop("date", axis = 1).to_numpy(), dtype = cTYPE)
     
     #Standardise
-    std, mean = torch.std_mean(train, dim = 0)
-    train = (train - mean) / std
+    #std, mean = torch.std_mean(train, dim = 0)
+    #train = (train - mean) / std
     
     n, d = train.shape
     trainX = torch.zeros((n - window, window, d), dtype = cTYPE)
@@ -121,51 +122,67 @@ def DelhiClimate(window = 7):
     for i in range(window, n):
         trainX[i - window] = train[i - window : i]
         trainY[i - window] = train[i]
-        
+    
+    print(TEXT.format("Data size", str(tuple(trainX.shape))))
     return trainX, trainY, None, None
         
-def Ethylene(window = 2, stride = 1):
-    classA = torch.tensor(numpy.loadtxt("./custom_data/mean_ethylene_CO.txt", delimiter = ","))
-    classB = torch.tensor(numpy.loadtxt("./custom_data/mean_ethylene_methane.txt", delimiter = ","))
+def Ethylene(window = 3, stride = 3):
+    classA = torch.tensor(numpy.loadtxt("./custom_data/mean_ethylene_CO.txt", delimiter = ",")) / 100
+    classB = torch.tensor(numpy.loadtxt("./custom_data/mean_ethylene_methane.txt", delimiter = ",")) / 100
 
-    prepX = torch.concat([classA, classB], dim = 0)
+    #prepX = torch.concat([classA, classB], dim = 0)
+    
     #std, mean = torch.std_mean(prepX, dim = 0)
     #prepX = (prepX - mean) / std
     
     n, d = classA.shape
     m, _ = classB.shape
-    del classA, classB
+    #del classA, classB
     
     trainX = torch.zeros((len(range(window, n, stride)) +
-                          len(range(window, m, stride)), window, d + 1), dtype = cTYPE)
+                          len(range(window, m, stride)), window, d - 2), dtype = cTYPE)
         
     trainY = torch.zeros((len(range(window, n, stride)) + 
-                          len(range(window, m, stride)), 16), dtype = cTYPE)
+                          len(range(window, m, stride)), 1), dtype = cTYPE)
     j = 0
     for i in range(window, n, stride):
-        trainX[j, :, 1:] = prepX[i - window : i]
-        trainY[j] = prepX[i, 2:]
+        trainX[j, :, 1:] = classA[i - window : i, 2:-1]
+        trainX[j, :, 0] = 1.
+        #trainX[j, :] = classA[i - window : i, 2:-1]
+        trainY[j] = classA[i - 1, -1]
         j += 1
 
     for i in range(window, m, stride):
-        trainX[j, :, 1:] = prepX[n + i - window : n + i]
-        trainX[j, :, 0] = 1.
-        trainY[j] = prepX[n + i, 2:]
+        trainX[j, :, 1:] = classB[i - window : i, 2:-1]
+        #trainX[j, :] = classB[i - window : i, 2:-1]
+        trainY[j] = classB[i - 1, -1]
         j += 1
-        
+    
     #shuffle
     n = torch.randperm(trainX.shape[0])
-    print(TEXT.format("Data size", str(tuple(trainX.shape))))
-    return trainX[n], trainY[n], None, None
+    trainX, trainY = trainX[n], trainY[n]
+    #trainY = torch.nn.functional.one_hot(trainY.long(), 2)
+    testX, testY = trainX[:44000], trainY[:44000]
+    trainX, trainY = trainX[44000:], trainY[44000:]
+    print(TEXT.format("Training size", str(tuple(trainX.shape))))
+    print(TEXT.format("Test size", str(tuple(testX.shape))))
+    return trainX, trainY, testX, testY
 
 def Covtype():
     X, Y = sklearn.datasets.fetch_covtype(return_X_y = True)
     X = torch.tensor(X, dtype = cTYPE)
     Y = torch.tensor(Y, dtype = torch.long) - 1
     
+    test_X = X[:2000]
+    X = X[2000:302000]
+    
+    test_Y = Y[:2000]
+    Y = Y[2000:302000]
+    
     #std, mean = torch.std_mean(X, dim = 0)
     #X = (X - mean) / std
     
     Y = torch.nn.functional.one_hot(Y, 7).to(cTYPE)
+    test_Y = torch.nn.functional.one_hot(test_Y, 7).to(cTYPE)
     print(TEXT.format("Data size", str(tuple(X.shape)))) 
-    return X, Y, None, None
+    return X, Y, test_X, test_Y

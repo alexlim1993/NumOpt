@@ -7,17 +7,17 @@ MINRES with NPC detection
 
 import torch
 
-def solvetm(A, b, xl, rtl, Delta, xnorm, phil, m_r, iters):    
-    xTr = torch.dot(xl, rtl)
-    diff = Delta**2 - xnorm**2
-    omega = (-xTr + torch.sqrt(xTr**2 + phil**2*diff))/phil**2
-    x = xl + omega*rtl   
-    m_x = torch.dot(x, -b) + torch.dot(x, Ax(A, x))/2
-    iters = iters + 1
-    if m_x <= m_r:
-        return x, m_x, iters
-    else:
-        return Delta*rtl/phil, m_r, iters
+#def solvetm(A, b, xl, rtl, Delta, xnorm, phil, m_r, iters):    
+#    xTr = torch.dot(xl, rtl)
+#    diff = Delta**2 - xnorm**2
+#    omega = (-xTr + torch.sqrt(xTr**2 + phil**2*diff))/phil**2
+#    x = xl + omega*rtl   
+#    m_x = torch.dot(x, -b) + torch.dot(x, Ax(A, x))/2
+#    iters = iters + 1
+#    if m_x <= m_r:
+#        return x, m_x, iters
+#    else:
+#        return Delta*rtl/phil, m_r, iters
 
 
 def lanczos(A, v, vp, beta, shift=0):
@@ -54,7 +54,7 @@ def updates(gamma2, cs, sn, phi, vn, v, wl, wl2, epsilon, delta2, xl, rtl):
     return x, w, wl, rt, tau, phi
 
 
-def myMINRES(A, b, rtol, maxit, shift=0,
+def myMINRES(A, b, rtol, maxit, sigma = 0,
              reOrth=True, isZero=1E-15):
     """    
     minres with indefiniteness detector of solving min||b - Ax||
@@ -74,10 +74,11 @@ def myMINRES(A, b, rtol, maxit, shift=0,
     Flag = 3, non-positive curvature direction detected.
     Flag = 4, the iteration limit was reached.
     """        
-    
+    dim = b.shape[0]
     r2 = b
     r3 = r2
     beta1 = torch.norm(r2)
+    norm_Ab = torch.norm(Ax(A,b)) 
         
     ## Initialize
     flag0 = -2
@@ -101,6 +102,7 @@ def myMINRES(A, b, rtol, maxit, shift=0,
     # print((A @ b).norm())
     
     x = torch.zeros_like(b)
+    xp = torch.zeros_like(b)
     w = torch.zeros_like(b)
     wl = torch.zeros_like(b) 
     v = torch.zeros_like(b) 
@@ -115,7 +117,7 @@ def myMINRES(A, b, rtol, maxit, shift=0,
 #    normHy2 = tau**2
     while flag == flag0:
         #lanczos
-        vn, v, alfa, betan = lanczos(A, vn, v, betan, shift)
+        vn, v, alfa, betan = lanczos(A, vn, v, betan)
         iters += 1
         if reOrth:
             if iters == 1:
@@ -140,14 +142,16 @@ def myMINRES(A, b, rtol, maxit, shift=0,
         ## Check if Lanczos Tridiagonal matrix T is singular
         cs, sn, gamma2 = symGivens(gamma1, betan) 
         
-        if phil*torch.sqrt(gamma2**2 + delta1n**2) < rtol*torch.sqrt(beta1**2-phil**2):
+        norm_Ar = phil*torch.sqrt(gamma2**2 + delta1n**2)
+        relAres = norm_Ar / norm_Ab
+        if norm_Ar < rtol*torch.sqrt(beta1**2 - phil**2):
             flag = 1  ## trustful least square solution
-            return xl, relres, iters, rtl, dType
+            return xl, relres, relAres, iters, rtl, dType
         
-        if nc >= -shift: # NPC detection
+        if -nc < sigma * dim: # NPC detection
             flag = 3
-            dType = 'NC'
-            return xl, relres, iters, rtl, dType        
+            dType = "NC"
+            return xl, relres, relAres, iters, rtl, dType
         
         if gamma2 > isZero:
             x, w, wl, rt, tau, phi = updates(gamma2, cs, sn, phi, vn, v, w, 
@@ -165,16 +169,16 @@ def myMINRES(A, b, rtol, maxit, shift=0,
             flag = 2
             print('flag = 2, b is not in the range(A)!')
             maxit += 1
-            return x, relres, iters, rt, dType
+            return x, relres, relAres, iters, rt, dType
             
         rnorm = phi
         relres = rnorm / beta1
+        xp = xl
         if iters >= maxit:
             flag = 4  ## exit before maxit
             dType = "MAX"
-            # print('Maximun iteration reached', flag, iters)
-            return x, relres, iters, rt, dType
-    return x, relres, iters, rt, dType
+            return x, relres, relAres, iters, rt, dType
+    return x, relres, relAres, iters, rt, dType
 
 
 def Ax(A, x):

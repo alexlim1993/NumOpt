@@ -6,9 +6,9 @@ Created on Mon Jan  9 12:33:43 2023
 """
 
 import torch.nn as nn
-import torch, math, tests
+import torch, math
 from functorch import make_functional
-from hyperparameters import cCUDA, cSPLIT, cTYPE
+from hyperparameters import cCUDA, cTYPE
 from regularizers import none_reg
 
 class auto_Encoder_MNIST(nn.Module):
@@ -52,21 +52,23 @@ class FFN(nn.Module):
     
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        self._nn = nn.Sequential(nn.Linear(input_dim, 512),
-                                 nn.Tanh(),
-                                 #nn.Linear(1024, 512),
-                                 #nn.Tanh(),
-                                 nn.Linear(512, 256),
+        self._nn = nn.Sequential(nn.Linear(input_dim, 256),
+                                 nn.Sigmoid(),
+                                 nn.Linear(256, 256),
                                  nn.Tanh(),
                                  nn.Linear(256, 128),
-                                 #nn.Tanh(),
-                                 #nn.Linear(128, 64),
-                                 #nn.Tanh(),
-                                 #nn.Linear(64, 32),
-                                 #nn.Tanh(),
-                                 #nn.Linear(32, 16),
+                                 nn.Sigmoid(),
+                                 nn.Linear(128, 128),
                                  nn.Tanh(),
-                                 nn.Linear(128, output_dim),
+                                 nn.Linear(128, 64),
+                                 nn.Sigmoid(),
+                                 nn.Linear(64, 64),
+                                 nn.Tanh(),
+                                 nn.Linear(64, 32),
+                                 nn.Sigmoid(),
+                                 nn.Linear(32, 32),
+                                 nn.Tanh(),
+                                 nn.Linear(32, output_dim),
                                  nn.Softmax(dim = 1))
 
     def forward(self, x):
@@ -176,18 +178,12 @@ class nnWrapper(Wrapper):
         return make_functional(self.func, disable_autograd_tracking = False)
     
     def f(self, x, X, Y):
-        if (X.shape[0] - 1) // cSPLIT >= 1:
-            return self._accf(x, X, Y)
-        
         device = x.device
         functional, w = self._toModule_toFunctional(x)
         with torch.no_grad():
             return self.loss(functional(w, X.to(device)), Y.to(device))
             
     def g(self, x, X, Y):
-        if (X.shape[0] - 1) // cSPLIT >= 1:
-            return self._accg(x, X, Y)
-        
         device = x.device
         functional, w = self._toModule_toFunctional(x)
         val = self.loss(functional(w, X.to(device)), Y.to(device))
@@ -196,9 +192,6 @@ class nnWrapper(Wrapper):
         return g.detach()
     
     def fg(self, x, X, Y):
-        if (X.shape[0] - 1) // cSPLIT >= 1:
-            return self._accfg(x, X, Y)
-        
         device = x.device
         functional, w = self._toModule_toFunctional(x)
         val = self.loss(functional(w, X.to(device)), Y.to(device))
@@ -207,9 +200,6 @@ class nnWrapper(Wrapper):
         return val.detach(), g.detach()
     
     def fgHv(self, x, X, Y):
-        if (X.shape[0] - 1) // cSPLIT >= 1:
-            return self._accfgHv(x, X, Y)
-        
         device = x.device
         functional, x = self._toModule_toFunctional(x)
         val = self.loss(functional(x, X.to(device)), Y.to(device))
@@ -221,9 +211,6 @@ class nnWrapper(Wrapper):
         return val.detach(), g.detach(), Hv
     
     def Hv(self, x, X, Y):
-        if (X.shape[0] - 1) // cSPLIT >= 1:
-            return self._accHv(x, X, Y)
-        
         device = x.device
         functional, x = self._toModule_toFunctional(x)
         val = self.loss(functional(x, X.to(device)), Y.to(device))
@@ -240,73 +227,13 @@ class nnWrapper(Wrapper):
         g = nn.utils.parameters_to_vector(g)
         return nn.utils.parameters_to_vector(torch.autograd.grad(g, x, v)).detach()
     
-    def _accf(self, x, X, Y):
-        n = X.shape[0]
-        acc_f = torch.tensor(0, dtype = cTYPE, device = cCUDA)
-        for i in range(cSPLIT, n + 1, cSPLIT):
-            acc_f += self.f(x, X[i - cSPLIT : i], Y[i - cSPLIT : i])
-        
-        acc_f *= (cSPLIT / n)
-        if n % cSPLIT != 0:
-            acc_f += self.f(x, X[i:], Y[i:]) * (n % cSPLIT / n)
-        return acc_f
-        
-    def _accg(self, x, X, Y):
-        n = X.shape[0]
-        acc_g = torch.zeros_like(x, dtype = cTYPE, device = cCUDA)
-        for i in range(cSPLIT, n + 1, cSPLIT):
-            acc_g += self.g(x, X[i - cSPLIT : i], Y[i - cSPLIT : i])
-              
-        acc_g *= (cSPLIT / n)
-        if n % cSPLIT != 0:
-            g = self.g(x, X[i:], Y[i:])
-            acc_g += g * (n % cSPLIT / n)
-        return acc_g
-           
-    def _accfg(self, x, X, Y):
-        n = X.shape[0]
-        acc_f = torch.tensor(0, dtype = cTYPE, device = cCUDA)
-        acc_g = torch.zeros_like(x, dtype = cTYPE, device = cCUDA)
-        for i in range(cSPLIT, n + 1, cSPLIT):
-            f, g = self.fg(x, X[i - cSPLIT : i], Y[i - cSPLIT : i])
-            acc_f += f
-            acc_g += g
-            del f, g
-        
-        acc_f *= (cSPLIT / n)
-        acc_g *= (cSPLIT / n)
-        if n % cSPLIT != 0:
-            f, g = self.fg(x, X[i:], Y[i:])
-            acc_f += f * (n % cSPLIT / n)
-            acc_g += g * (n % cSPLIT / n)
-        return acc_f, acc_g
-    
-    def _accfgHv(self, x, X, Y):
-        return *self._accfg(x, X, Y), lambda v : self._accHv(v, x, X, Y)
-    
-    def _accHv(self, v, x, X, Y):
-        n = X.shape[0]
-        Hvec = torch.zeros_like(x, dtype = cTYPE, device = cCUDA)
-        for i in range(cSPLIT, n + 1, cSPLIT):
-            Hvec += self._HvSingle(v, x, X[i - cSPLIT : i], Y[i - cSPLIT : i])
-
-        Hvec *= (cSPLIT / n)
-        if n % cSPLIT != 0:
-            Hvec += self._HvSingle(v, x, X[i:], Y[i:]) * (n % cSPLIT / n)
-        return Hvec
-    
     def __call__(self, x, order, X, Y):
         return self._funcs[order](x, X, Y)
     
 class ObjFunc:
     
     def __init__(self, func, loss, X, Y, reg, mini, Hsub):
-        
-        if X.shape[0] // cSPLIT >= 1:
-            self.X, self.Y = X, Y
-        else:
-            self.X, self.Y = X.to(cCUDA), Y.to(cCUDA)
-            
+        self.X, self.Y = X.to(cCUDA), Y.to(cCUDA)
         self.fun = nnWrapper(func, loss)
         self.Hsub = Hsub
         self.mini = mini
@@ -316,7 +243,6 @@ class ObjFunc:
             self.reg = funcWrapper(reg)
             
     def minibatch(self, x, order):
-        
         n = self.X.shape[0]
         m = math.ceil(n * self.mini)
         perm = torch.randperm(n)
@@ -330,7 +256,6 @@ class ObjFunc:
             return f + f_reg, g + g_reg
             
     def subHessian(self, x, order):
-        
         n = self.X.shape[0]
         m = math.ceil(n * self.Hsub)
         perm = torch.randperm(n)
@@ -353,7 +278,6 @@ class ObjFunc:
         
             
     def __call__(self, x, order):
-    
         if order == "f":
             return self.fun(x, "0", self.X, self.Y) + self.reg(x, "0")
             

@@ -9,21 +9,19 @@ import utils, torch
 import hyperparameters as hyper 
 import sys
 
-SEED = 1234 # integers
+SEED = 1234 #2345 # integers
 FOLDER_PATH = f"./{sys.argv[1]}"
-DATASET = "Ethylene" #MNIST, MNISTb, MNISTsb, MNISTs, CIFAR10b, CIFAR10, DelhiClimate, Ethylene
+DATASET = "Ethylene" #MNIST, MNISTb, MNISTsb, MNISTs, CIFAR10b, CIFAR10, DelhiClimate, Ethylene, Covtype
 FUNC = "rnnMSE" #"logloss", "nls", "ffnnMSE", "ffnnCELoss", "rnnMSE", "rnnCELoss"
 INITX0 = "normal" #zeros, ones, uniform, normal, torch
 REG = "Non-convex" # None, 2-norm, Non-convex
-REG_LAMBDA = 0.1
+REG_LAMBDA = 1e-8
 VERBOSE = True
-HSUB = float(sys.argv[2]) #[1, 0.1, 0.05, 0.01]
+HSUB = [float(sys.argv[2])] #[1, 0.1, 0.05, 0.01]
 MINI = 1
 
 if "CG" in sys.argv[1]:
     ALG = [("NewtonCG_NC", hyper.cCG_NC)]
-elif "MRnoLS" == sys.argv[1]:
-    ALG = [("NewtonMR_NC_no_LS", hyper.cMR)]
 elif "MR" in sys.argv[1]:
     ALG = [("NewtonMR_NC", hyper.cMR)]
 elif "TR" in sys.argv[1]:
@@ -47,26 +45,18 @@ elif "SGD" in sys.argv[1]:
        #]
 
     
-def run(folder_path, dataset, alg, func, x0, mini, Hsub, reg, lamb, verbose):
-    
-    assert type(alg) == list
-        
+def run(folder_path, dataset, alg, func, x0, mini, Hsub, reg, lamb, verbose):    
     print("***Running on", str(hyper.cCUDA) + "***")
+    print("\n" + 45 * ".")
     
-    for j, c in alg:
-        print("\n" + 45 * ".")
-        c.Hsub = Hsub
-        algo, x0 = utils.execute(folder_path, dataset, j, func, x0, mini, Hsub, reg, lamb, c, verbose)
-        utils.saveRecords(folder_path, dataset, j, func, Hsub, algo.record)
+    alg[1].Hsub = Hsub
+    algo, x0 = utils.execute(folder_path, dataset, alg[0], func, x0, mini, Hsub, reg, lamb, alg[1], verbose)
+    utils.saveRecords(folder_path, dataset, alg[0], func, Hsub, algo.record)
 
 if __name__ == "__main__":
     
     if type(SEED) == int:
         torch.manual_seed(SEED)
     
-    run(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, MINI, HSUB, REG, REG_LAMBDA, VERBOSE)
-    
-    # if FUNC == "GAN":
-    #     runGAN(FOLDER_PATH, DATASET, ALGG, ALGD, CONSTG, CONSTD, HSUB[0], REG, REG_LAMBDA, CUDA)
-    # else:
-    #     run(FOLDER_PATH, DATASET, ALG, FUNC, INITX0, HSUB, REG, REG_LAMBDA, VERBOSE, CUDA)
+    for i in HSUB:
+      run(FOLDER_PATH, DATASET, ALG[0], FUNC, INITX0, MINI, i, REG, REG_LAMBDA, VERBOSE)
